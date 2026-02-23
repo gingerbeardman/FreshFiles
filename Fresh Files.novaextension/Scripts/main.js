@@ -1,50 +1,87 @@
 const GitService = require("./GitService.js");
 const FreshFilesDataProvider = require("./FreshFilesDataProvider.js");
 
-const TIME_WINDOWS = ["pending", "7", "30", "90"];
+const TIME_WINDOWS = ["pending", "1h", "4h", "1d", "3d", "7d", "14d", "30d", "90d", "180d"];
 const TIME_WINDOW_LABELS = {
     pending: "Pending Changes",
-    7: "Last 7 Days",
-    30: "Last 30 Days",
-    90: "Last 90 Days",
-    180: "Last 180 Days"
+    "1h": "Last 1 Hour",
+    "4h": "Last 4 Hours",
+    "1d": "Last 1 Day",
+    "3d": "Last 3 Days",
+    "7d": "Last 7 Days",
+    "14d": "Last 14 Days",
+    "30d": "Last 30 Days",
+    "90d": "Last 90 Days",
+    "180d": "Last 180 Days"
 };
 
 let treeView = null;
 let dataProvider = null;
 let gitService = null;
 let refreshTimer = null;
+let isRefreshing = false;
+let refreshQueued = false;
 
 function debounceRefresh() {
     if (refreshTimer) {
         clearTimeout(refreshTimer);
     }
-    refreshTimer = setTimeout(async () => {
+    refreshTimer = setTimeout(() => {
         refreshTimer = null;
-        await doRefresh();
-    }, 1000);
+        doRefresh();
+    }, 2000);
 }
 
 async function doRefresh() {
     if (!dataProvider || !treeView) return;
+
+    // Prevent overlapping refreshes; queue one if already running
+    if (isRefreshing) {
+        refreshQueued = true;
+        return;
+    }
+
+    isRefreshing = true;
     try {
         await dataProvider.refresh();
         treeView.reload();
     } catch (err) {
         console.error("Fresh Files refresh error:", err.message);
+    } finally {
+        isRefreshing = false;
+        if (refreshQueued) {
+            refreshQueued = false;
+            debounceRefresh();
+        }
     }
 }
 
 function getCurrentTimeWindow() {
-    return nova.workspace.config.get("com.mattwoods.FreshFiles.timeWindow", "string") || "pending";
+    return nova.workspace.config.get("com.gingerbeardman.FreshFiles.timeWindow", "string") || "pending";
 }
 
 exports.activate = function () {
     gitService = new GitService();
     dataProvider = new FreshFilesDataProvider(gitService);
 
-    treeView = new TreeView("com.mattwoods.FreshFiles.section", {
+    // Restore persisted layout and sort preferences
+    const savedFlat = nova.workspace.config.get("com.gingerbeardman.FreshFiles.flatLayout", "boolean");
+    const savedSort = nova.workspace.config.get("com.gingerbeardman.FreshFiles.sortByName", "boolean");
+    if (savedFlat !== null) dataProvider._flat = savedFlat;
+    if (savedSort !== null) dataProvider._sortByName = savedSort;
+
+    treeView = new TreeView("com.gingerbeardman.FreshFiles.section", {
         dataProvider: dataProvider
+    });
+
+    // Single-click to open file
+    treeView.onDidChangeSelection((selection) => {
+        if (selection && selection.length > 0) {
+            const item = selection[0];
+            if (!item.isDirectory && item.path) {
+                nova.workspace.openFile(item.path);
+            }
+        }
     });
 
     // Register commands
@@ -59,7 +96,7 @@ exports.activate = function () {
             const selection = treeView.selection;
             if (selection && selection.length > 0) {
                 const item = selection[0];
-                if (!item.isDirectory) {
+                if (!item.isDirectory && item.path) {
                     nova.workspace.openFile(item.path);
                 }
             }
@@ -71,17 +108,15 @@ exports.activate = function () {
             const selection = treeView.selection;
             if (selection && selection.length > 0) {
                 const item = selection[0];
-                if (!item.isDirectory) {
-                    const process = new Process("/usr/bin/open", {
-                        args: ["-R", item.path]
-                    });
-                    process.onDidExit((status) => {
-                        if (status !== 0) {
-                            console.error("Failed to reveal in Finder:", item.path);
-                        }
-                    });
-                    process.start();
-                }
+                const process = new Process("/usr/bin/open", {
+                    args: ["-R", item.path]
+                });
+                process.onDidExit((status) => {
+                    if (status !== 0) {
+                        console.error("Failed to reveal in Finder:", item.path);
+                    }
+                });
+                process.start();
             }
         })
     );
@@ -91,9 +126,7 @@ exports.activate = function () {
             const selection = treeView.selection;
             if (selection && selection.length > 0) {
                 const item = selection[0];
-                if (!item.isDirectory) {
-                    nova.clipboard.writeText(item.path);
-                }
+                nova.clipboard.writeText(item.path);
             }
         })
     );
@@ -103,9 +136,7 @@ exports.activate = function () {
             const selection = treeView.selection;
             if (selection && selection.length > 0) {
                 const item = selection[0];
-                if (!item.isDirectory) {
-                    nova.clipboard.writeText(item.relativePath);
-                }
+                nova.clipboard.writeText(item.relativePath);
             }
         })
     );
@@ -119,7 +150,7 @@ exports.activate = function () {
 
             nova.workspace.showChoicePalette(options, { placeholder: "Select time window" }, (choice, index) => {
                 if (choice !== null && index !== undefined) {
-                    nova.workspace.config.set("com.mattwoods.FreshFiles.timeWindow", keys[index]);
+                    nova.workspace.config.set("com.gingerbeardman.FreshFiles.timeWindow", keys[index]);
                 }
             });
         })
@@ -130,7 +161,7 @@ exports.activate = function () {
             const current = getCurrentTimeWindow();
             const idx = TIME_WINDOWS.indexOf(current);
             const next = TIME_WINDOWS[(idx + 1) % TIME_WINDOWS.length];
-            nova.workspace.config.set("com.mattwoods.FreshFiles.timeWindow", next);
+            nova.workspace.config.set("com.gingerbeardman.FreshFiles.timeWindow", next);
 
             // Show brief notification of the new window
             const label = TIME_WINDOW_LABELS[next] || next;
@@ -138,21 +169,38 @@ exports.activate = function () {
         })
     );
 
-    // Watch for file changes
-    const watcher = nova.fs.watch(null, () => {
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.toggleFlat", () => {
+            dataProvider._flat = !dataProvider._flat;
+            nova.workspace.config.set("com.gingerbeardman.FreshFiles.flatLayout", dataProvider._flat);
+            doRefresh();
+        })
+    );
+
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.toggleSort", () => {
+            dataProvider._sortByName = !dataProvider._sortByName;
+            nova.workspace.config.set("com.gingerbeardman.FreshFiles.sortByName", dataProvider._sortByName);
+            doRefresh();
+        })
+    );
+
+    // Watch for file changes (use "**/*" to get path info, filter out .git/)
+    const watcher = nova.fs.watch("**/*", (path) => {
+        if (path && (path.includes("/.git/") || path.endsWith("/.git"))) return;
         debounceRefresh();
     });
     nova.subscriptions.add(watcher);
 
     // Watch for config changes
     nova.subscriptions.add(
-        nova.workspace.config.onDidChange("com.mattwoods.FreshFiles.timeWindow", () => {
+        nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.timeWindow", () => {
             doRefresh();
         })
     );
 
     nova.subscriptions.add(
-        nova.workspace.config.onDidChange("com.mattwoods.FreshFiles.ignoredPatterns", () => {
+        nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.ignoredPatterns", () => {
             doRefresh();
         })
     );

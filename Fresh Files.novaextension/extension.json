@@ -1,9 +1,12 @@
 {
-    "identifier": "com.mattwoods.FreshFiles",
+    "identifier": "com.gingerbeardman.FreshFiles",
     "name": "Fresh Files",
-    "organization": "Matt Woods",
+    "organization": "gingerbeardman",
     "description": "An alternative file browser sidebar that shows only recently modified files, using Git history to surface the files you're actively working on.",
     "version": "1.0.0",
+    "bugs": "https://github.com/gingerbeardman/FreshFiles/issues",
+    "homepage": "https://github.com/gingerbeardman/FreshFiles",
+    "repository": "https://github.com/gingerbeardman/FreshFiles",
 
     "categories": ["sidebars"],
 
@@ -20,21 +23,26 @@
 
     "configWorkspace": [
         {
-            "key": "com.mattwoods.FreshFiles.timeWindow",
+            "key": "com.gingerbeardman.FreshFiles.timeWindow",
             "title": "Time Window",
             "description": "Show files modified within this time period. \"Pending\" shows uncommitted changes.",
             "type": "enum",
             "values": [
                 ["pending", "Pending Changes"],
-                ["7", "Last 7 Days"],
-                ["30", "Last 30 Days"],
-                ["90", "Last 90 Days"],
-                ["180", "Last 180 Days"]
+                ["1h", "Last 1 Hour"],
+                ["4h", "Last 4 Hours"],
+                ["1d", "Last 1 Day"],
+                ["3d", "Last 3 Days"],
+                ["7d", "Last 7 Days"],
+                ["14d", "Last 14 Days"],
+                ["30d", "Last 30 Days"],
+                ["90d", "Last 90 Days"],
+                ["180d", "Last 180 Days"]
             ],
             "default": "pending"
         },
         {
-            "key": "com.mattwoods.FreshFiles.ignoredPatterns",
+            "key": "com.gingerbeardman.FreshFiles.ignoredPatterns",
             "title": "Ignored Patterns",
             "description": "Additional file patterns to ignore (one per line). Supports glob patterns.",
             "type": "stringArray",
@@ -44,45 +52,48 @@
 
     "sidebars": [
         {
-            "id": "com.mattwoods.FreshFiles.sidebar",
+            "id": "com.gingerbeardman.FreshFiles.sidebar",
             "name": "Fresh Files",
             "smallImage": "sidebar-small",
             "largeImage": "sidebar-large",
             "sections": [
                 {
-                    "id": "com.mattwoods.FreshFiles.section",
+                    "id": "com.gingerbeardman.FreshFiles.section",
                     "name": "Fresh Files",
-                    "placeholderText": "No recently modified files found.",
+                    "placeholderText": "No recently modified files found.\nRequires a Git repository.",
                     "placeholderImage": "sidebar-large",
                     "headerCommands": [
                         {
-                            "title": "Refresh",
-                            "image": "__builtin.refresh",
-                            "tooltip": "Refresh the file list",
-                            "command": "freshFiles.refresh"
+                            "title": "Sort",
+                            "image": "sort",
+                            "tooltip": "Toggle sort order",
+                            "command": "freshFiles.toggleSort"
+                        },
+                        {
+                            "title": "Flat/Tree",
+                            "image": "__builtin.path",
+                            "tooltip": "Toggle between flat list and directory tree",
+                            "command": "freshFiles.toggleFlat"
                         },
                         {
                             "title": "Time Window",
                             "image": "__builtin.action",
-                            "tooltip": "Cycle time window",
-                            "command": "freshFiles.cycleTimeWindow"
+                            "tooltip": "Set time window",
+                            "command": "freshFiles.setTimeWindow"
                         }
                     ],
                     "contextCommands": [
                         {
                             "title": "Show in Finder",
-                            "command": "freshFiles.revealInFinder",
-                            "when": "viewItem == 'file'"
+                            "command": "freshFiles.revealInFinder"
                         },
                         {
                             "title": "Copy Path",
-                            "command": "freshFiles.copyPath",
-                            "when": "viewItem == 'file'"
+                            "command": "freshFiles.copyPath"
                         },
                         {
                             "title": "Copy Relative Path",
-                            "command": "freshFiles.copyRelativePath",
-                            "when": "viewItem == 'file'"
+                            "command": "freshFiles.copyRelativePath"
                         }
                     ]
                 }

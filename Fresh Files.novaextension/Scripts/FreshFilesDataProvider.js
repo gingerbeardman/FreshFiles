@@ -6,6 +6,8 @@ class FreshFilesDataProvider {
         this.gitService = gitService;
         this._rootItems = [];
         this._ignoredPatterns = [];
+        this._flat = true;
+        this._sortByName = false;
     }
 
     getChildren(element) {
@@ -18,7 +20,7 @@ class FreshFilesDataProvider {
     getTreeItem(element) {
         if (element.isDirectory) {
             const item = new TreeItem(element.name, TreeItemCollapsibleState.Expanded);
-            item.image = "__builtin.path";
+            item.image = "__symbol.function";
             item.identifier = element.path;
             const count = element.fileCount;
             item.descriptiveText = `${count} file${count !== 1 ? "s" : ""}`;
@@ -27,7 +29,7 @@ class FreshFilesDataProvider {
         }
 
         const item = new TreeItem(element.name, TreeItemCollapsibleState.None);
-        item.path = element.path;
+        item.image = this._fileTypeImage(element.name);
         item.identifier = element.path;
         item.command = "freshFiles.open";
         item.contextValue = "file";
@@ -36,11 +38,14 @@ class FreshFilesDataProvider {
             item.descriptiveText = relativeTime(element.mtime);
         }
 
-        if (element.status) {
-            item.tooltip = `${element.relativePath} [${element.status}]`;
-        }
+        item.tooltip = element.relativePath;
 
         return item;
+    }
+
+    _fileTypeImage(filename) {
+        const ext = nova.path.extname(filename).replace(/^\./, "");
+        return ext ? `__filetype.${ext}` : "__filetype.blank";
     }
 
     async refresh() {
@@ -50,15 +55,31 @@ class FreshFilesDataProvider {
             return;
         }
 
-        const timeWindow = nova.workspace.config.get("com.mattwoods.FreshFiles.timeWindow", "string") || "pending";
-        this._ignoredPatterns = nova.workspace.config.get("com.mattwoods.FreshFiles.ignoredPatterns", "stringArray") || [];
+        // Check for git repo (also primes the cache)
+        await this.gitService.getGitRoot(workspacePath);
+        if (!this.gitService.isGitRepo) {
+            this._rootItems = [];
+            return;
+        }
+
+        const timeWindow = nova.workspace.config.get("com.gingerbeardman.FreshFiles.timeWindow", "string") || "pending";
+        this._ignoredPatterns = nova.workspace.config.get("com.gingerbeardman.FreshFiles.ignoredPatterns", "stringArray") || [];
 
         let files;
         if (timeWindow === "pending") {
             files = await this.gitService.getPendingFiles(workspacePath);
         } else {
-            const days = parseInt(timeWindow, 10);
-            files = await this.gitService.getHistoricalFiles(workspacePath, days);
+            // Parse "1h", "4h", "1d", "3d" etc. into git --since argument
+            const match = timeWindow.match(/^(\d+)(h|d)$/);
+            let sinceArg;
+            if (match) {
+                const num = match[1];
+                const unit = match[2] === "h" ? "hours" : "days";
+                sinceArg = `${num}.${unit}.ago`;
+            } else {
+                sinceArg = `${timeWindow}.days.ago`;
+            }
+            files = await this.gitService.getHistoricalFiles(workspacePath, sinceArg);
         }
 
         // Filter ignored patterns
@@ -66,7 +87,11 @@ class FreshFilesDataProvider {
             files = files.filter((f) => !this._matchesIgnored(f.relativePath));
         }
 
-        this._rootItems = this._buildTree(files, workspacePath);
+        if (this._flat) {
+            this._rootItems = this._buildFlatList(files);
+        } else {
+            this._rootItems = this._buildTree(files, workspacePath);
+        }
     }
 
     _matchesIgnored(relativePath) {
@@ -87,6 +112,18 @@ class FreshFilesDataProvider {
             .replace(/\{\{DOUBLESTAR\}\}/g, ".*")
             .replace(/\?/g, "[^/]");
         return new RegExp(`^${regex}$`);
+    }
+
+    _buildFlatList(files) {
+        const items = files.map((file) => {
+            const basename = nova.path.basename(file.relativePath);
+            const fileItem = new FileItem(basename, file.absolutePath, false);
+            fileItem.relativePath = file.relativePath;
+            fileItem.mtime = file.mtime instanceof Date ? file.mtime : new Date(file.mtime);
+            fileItem.status = file.status;
+            return fileItem;
+        });
+        return this._sortItems(items);
     }
 
     _buildTree(files, workspacePath) {
@@ -182,11 +219,17 @@ class FreshFilesDataProvider {
 
     _sortItems(items) {
         return [...items].sort((a, b) => {
-            // Directories first
-            if (a.isDirectory && !b.isDirectory) return -1;
-            if (!a.isDirectory && b.isDirectory) return 1;
+            // Directories first (only in tree mode)
+            if (!this._flat) {
+                if (a.isDirectory && !b.isDirectory) return -1;
+                if (!a.isDirectory && b.isDirectory) return 1;
+            }
 
-            // Then by mtime descending (newest first)
+            if (this._sortByName) {
+                return a.name.localeCompare(b.name);
+            }
+
+            // By mtime descending (newest first)
             const aTime = a.isDirectory ? a.newestMtime : a.mtime;
             const bTime = b.isDirectory ? b.newestMtime : b.mtime;
 

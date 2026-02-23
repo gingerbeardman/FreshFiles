@@ -1,0 +1,33 @@
+{
+  "shadowOpacity" : 0,
+  "iconScale" : 0.6779560368342596,
+  "id" : "24670896-9CE6-40DD-86CB-111B3E0DEB8D",
+  "symbolColor" : {
+    "green" : 0.9999999403953552,
+    "alpha" : 1,
+    "blue" : 0.9999999403953552,
+    "red" : 0.9999999403953552
+  },
+  "shadowHeight" : 0.3,
+  "symbol" : {
+    "family" : "sf-symbols",
+    "name" : "clock"
+  },
+  "version" : 1,
+  "topColor" : {
+    "green" : 0.6745098039215687,
+    "alpha" : 1,
+    "blue" : 0.7568627450980392,
+    "red" : 0
+  },
+  "bottomColor" : {
+    "green" : 0.7019607843137254,
+    "alpha" : 1,
+    "blue" : 0.2588235294117647,
+    "red" : 0.48627450980392156
+  },
+  "iconOffset" : [
+    0,
+    0
+  ]
+}

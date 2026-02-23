@@ -1,6 +1,8 @@
 class GitService {
     constructor() {
         this._gitRoot = null;
+        this._gitRootWorkspace = null;
+        this.isGitRepo = true;
     }
 
     runProcess(command, args, cwd) {
@@ -34,14 +36,21 @@ class GitService {
     }
 
     async getGitRoot(workspacePath) {
-        if (this._gitRoot) return this._gitRoot;
+        // Re-check if workspace changed
+        if (this._gitRoot && this._gitRootWorkspace === workspacePath) {
+            return this._gitRoot;
+        }
 
         try {
             const output = await this.runProcess("/usr/bin/git", ["rev-parse", "--show-toplevel"], workspacePath);
             this._gitRoot = output.trim();
+            this._gitRootWorkspace = workspacePath;
+            this.isGitRepo = true;
             return this._gitRoot;
         } catch (err) {
-            console.error("Failed to get git root:", err.message);
+            this._gitRoot = null;
+            this._gitRootWorkspace = workspacePath;
+            this.isGitRepo = false;
             return null;
         }
     }
@@ -59,7 +68,12 @@ class GitService {
 
             for (const line of lines) {
                 const statusCode = line.substring(0, 2).trim();
-                const filePath = line.substring(3);
+                let filePath = line.substring(3);
+
+                // Strip surrounding quotes (git quotes paths with spaces/special chars)
+                if (filePath.startsWith('"') && filePath.endsWith('"')) {
+                    filePath = filePath.slice(1, -1).replace(/\\"/g, '"');
+                }
 
                 // Skip empty paths
                 if (!filePath) continue;
@@ -99,14 +113,14 @@ class GitService {
         }
     }
 
-    async getHistoricalFiles(workspacePath, days) {
+    async getHistoricalFiles(workspacePath, sinceArg) {
         try {
             const gitRoot = await this.getGitRoot(workspacePath);
             if (!gitRoot) return [];
 
             const output = await this.runProcess(
                 "/usr/bin/git",
-                ["log", `--since=${days}.days.ago`, "--name-status", "--format=%aI", "--diff-filter=ACDMR"],
+                ["log", `--since=${sinceArg}`, "--name-status", "--format=%aI", "--diff-filter=ACDMR"],
                 workspacePath
             );
             if (!output.trim()) return [];
@@ -129,6 +143,11 @@ class GitService {
                 if (match && currentDate) {
                     const status = match[1];
                     let filePath = match[2];
+
+                    // Strip surrounding quotes
+                    if (filePath.startsWith('"') && filePath.endsWith('"')) {
+                        filePath = filePath.slice(1, -1).replace(/\\"/g, '"');
+                    }
 
                     // Handle renames: "R\told\tnew"
                     if (filePath.includes("\t")) {
@@ -168,6 +187,7 @@ class GitService {
 
     clearCache() {
         this._gitRoot = null;
+        this._gitRootWorkspace = null;
     }
 }
 
