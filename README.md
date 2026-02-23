@@ -6,6 +6,10 @@ An alternative file browser sidebar that shows only recently modified files, usi
 
 See the internal [README](/Fresh%20Files.novaextension/README.md) for more info.
 
+## Inspired by
+
+[Fresh File Explorer](https://github.com/FreHu/vscode-fresh-file-explorer) for VS Code.
+
 ## Licence
 
 [MIT](/LICENSE)
