@@ -53,7 +53,7 @@ Right-click on any file or directory to:
 
 ## Configuration
 
-Per-workspace settings are available in **Extensions > Extension Library > Fresh Files**:
+Per-workspace settings are available in **Project > Project Settings > Fresh Files**:
 
 - **Time Window** — which time period to show
 - **Ignored Patterns** — glob patterns for files to hide
