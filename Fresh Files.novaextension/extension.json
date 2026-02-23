@@ -1,0 +1,105 @@
+{
+    "identifier": "com.mattwoods.FreshFiles",
+    "name": "Fresh Files",
+    "organization": "Matt Woods",
+    "description": "An alternative file browser sidebar that shows only recently modified files, using Git history to surface the files you're actively working on.",
+    "version": "1.0.0",
+
+    "categories": ["sidebars"],
+
+    "main": "main.js",
+
+    "activationEvents": [
+        "*"
+    ],
+
+    "entitlements": {
+        "filesystem": "readonly",
+        "process": true
+    },
+
+    "configWorkspace": [
+        {
+            "key": "com.mattwoods.FreshFiles.timeWindow",
+            "title": "Time Window",
+            "description": "Show files modified within this time period. \"Pending\" shows uncommitted changes.",
+            "type": "enum",
+            "values": [
+                ["pending", "Pending Changes"],
+                ["7", "Last 7 Days"],
+                ["30", "Last 30 Days"],
+                ["90", "Last 90 Days"],
+                ["180", "Last 180 Days"]
+            ],
+            "default": "pending"
+        },
+        {
+            "key": "com.mattwoods.FreshFiles.ignoredPatterns",
+            "title": "Ignored Patterns",
+            "description": "Additional file patterns to ignore (one per line). Supports glob patterns.",
+            "type": "stringArray",
+            "default": []
+        }
+    ],
+
+    "sidebars": [
+        {
+            "id": "com.mattwoods.FreshFiles.sidebar",
+            "name": "Fresh Files",
+            "smallImage": "sidebar-small",
+            "largeImage": "sidebar-large",
+            "sections": [
+                {
+                    "id": "com.mattwoods.FreshFiles.section",
+                    "name": "Fresh Files",
+                    "placeholderText": "No recently modified files found.",
+                    "placeholderImage": "sidebar-large",
+                    "headerCommands": [
+                        {
+                            "title": "Refresh",
+                            "image": "__builtin.refresh",
+                            "tooltip": "Refresh the file list",
+                            "command": "freshFiles.refresh"
+                        },
+                        {
+                            "title": "Time Window",
+                            "image": "__builtin.action",
+                            "tooltip": "Cycle time window",
+                            "command": "freshFiles.cycleTimeWindow"
+                        }
+                    ],
+                    "contextCommands": [
+                        {
+                            "title": "Show in Finder",
+                            "command": "freshFiles.revealInFinder",
+                            "when": "viewItem == 'file'"
+                        },
+                        {
+                            "title": "Copy Path",
+                            "command": "freshFiles.copyPath",
+                            "when": "viewItem == 'file'"
+                        },
+                        {
+                            "title": "Copy Relative Path",
+                            "command": "freshFiles.copyRelativePath",
+                            "when": "viewItem == 'file'"
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+
+    "commands": {
+        "extensions": [
+            {
+                "title": "Refresh Fresh Files",
+                "command": "freshFiles.refresh"
+            },
+            {
+                "title": "Set Time Window...",
+                "command": "freshFiles.setTimeWindow"
+            }
+        ]
+    }
+}
