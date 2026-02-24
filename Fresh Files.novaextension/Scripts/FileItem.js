@@ -8,6 +8,8 @@ class FileItem {
         this.parent = null;
         this.mtime = null;
         this.status = null;
+        this.isPinned = false;
+        this.isDeleted = false;
     }
 
     addChild(child) {

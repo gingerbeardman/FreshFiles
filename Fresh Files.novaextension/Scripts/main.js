@@ -1,7 +1,9 @@
 const GitService = require("./GitService.js");
+const FileSystemService = require("./FileSystemService.js");
 const FreshFilesDataProvider = require("./FreshFilesDataProvider.js");
+const { relativeTime } = require("./TimeUtils.js");
 
-const TIME_WINDOWS = ["pending", "1h", "4h", "1d", "3d", "7d", "14d", "30d", "90d", "180d"];
+const TIME_WINDOWS = ["pending", "1h", "4h", "1d", "3d", "7d", "14d", "30d", "90d", "180d", "360d"];
 const TIME_WINDOW_LABELS = {
     pending: "Pending Changes",
     "1h": "Last 1 Hour",
@@ -12,12 +14,14 @@ const TIME_WINDOW_LABELS = {
     "14d": "Last 14 Days",
     "30d": "Last 30 Days",
     "90d": "Last 90 Days",
-    "180d": "Last 180 Days"
+    "180d": "Last 180 Days",
+    "360d": "Last 360 Days"
 };
 
 let treeView = null;
 let dataProvider = null;
 let gitService = null;
+let fileSystemService = null;
 let refreshTimer = null;
 let isRefreshing = false;
 let refreshQueued = false;
@@ -62,7 +66,8 @@ function getCurrentTimeWindow() {
 
 exports.activate = function () {
     gitService = new GitService();
-    dataProvider = new FreshFilesDataProvider(gitService);
+    fileSystemService = new FileSystemService();
+    dataProvider = new FreshFilesDataProvider(gitService, fileSystemService);
 
     // Restore persisted layout and sort preferences
     const savedFlat = nova.workspace.config.get("com.gingerbeardman.FreshFiles.flatLayout", "boolean");
@@ -78,7 +83,7 @@ exports.activate = function () {
     treeView.onDidChangeSelection((selection) => {
         if (selection && selection.length > 0) {
             const item = selection[0];
-            if (!item.isDirectory && item.path) {
+            if (!item.isDirectory && !item.isDeleted && item.path) {
                 nova.workspace.openFile(item.path);
             }
         }
@@ -96,7 +101,7 @@ exports.activate = function () {
             const selection = treeView.selection;
             if (selection && selection.length > 0) {
                 const item = selection[0];
-                if (!item.isDirectory && item.path) {
+                if (!item.isDirectory && !item.isDeleted && item.path) {
                     nova.workspace.openFile(item.path);
                 }
             }
@@ -108,6 +113,7 @@ exports.activate = function () {
             const selection = treeView.selection;
             if (selection && selection.length > 0) {
                 const item = selection[0];
+                if (item.isDeleted) return;
                 const process = new Process("/usr/bin/open", {
                     args: ["-R", item.path]
                 });
@@ -185,9 +191,138 @@ exports.activate = function () {
         })
     );
 
-    // Watch for file changes (use "**/*" to get path info, filter out .git/)
+    // Pin file command
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.pinFile", () => {
+            const selection = treeView.selection;
+            if (!selection || selection.length === 0) return;
+            const item = selection[0];
+            if (item.isDirectory || item.isPinned) return;
+
+            const pinnedFiles = nova.workspace.config.get("com.gingerbeardman.FreshFiles.pinnedFiles", "stringArray") || [];
+            if (!pinnedFiles.includes(item.relativePath)) {
+                pinnedFiles.push(item.relativePath);
+                nova.workspace.config.set("com.gingerbeardman.FreshFiles.pinnedFiles", pinnedFiles);
+            }
+        })
+    );
+
+    // Unpin file command
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.unpinFile", () => {
+            const selection = treeView.selection;
+            if (!selection || selection.length === 0) return;
+            const item = selection[0];
+            if (item.isDirectory || !item.isPinned) return;
+
+            const pinnedFiles = nova.workspace.config.get("com.gingerbeardman.FreshFiles.pinnedFiles", "stringArray") || [];
+            const index = pinnedFiles.indexOf(item.relativePath);
+            if (index !== -1) {
+                pinnedFiles.splice(index, 1);
+                nova.workspace.config.set("com.gingerbeardman.FreshFiles.pinnedFiles", pinnedFiles);
+            }
+        })
+    );
+
+    // Show file history command
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.showFileHistory", async () => {
+            const selection = treeView.selection;
+            if (!selection || selection.length === 0) return;
+            const item = selection[0];
+            if (item.isDirectory) return;
+
+            const workspacePath = nova.workspace.path;
+            if (!workspacePath) return;
+
+            if (!gitService.isGitRepo) {
+                nova.workspace.showInformativeMessage("File history requires a Git repository.");
+                return;
+            }
+
+            const commits = await gitService.getFileHistory(workspacePath, item.path);
+            if (commits.length === 0) {
+                nova.workspace.showWarningMessage("No history found for this file.");
+                return;
+            }
+
+            const choices = commits.map((c) => {
+                const shortHash = c.hash.substring(0, 7);
+                const age = relativeTime(c.date);
+                return `${shortHash} — ${c.message} (${age})`;
+            });
+
+            nova.workspace.showChoicePalette(choices, { placeholder: "Select a commit" }, async (choice, index) => {
+                if (choice === null || index === undefined) return;
+
+                const commit = commits[index];
+                const gitRoot = await gitService.getGitRoot(workspacePath);
+                const relativePath = gitService._relativeTo(item.path, gitRoot);
+
+                try {
+                    const diffOutput = await gitService.runProcess(
+                        "/usr/bin/git",
+                        ["diff", `${commit.hash}~1`, commit.hash, "--", relativePath],
+                        workspacePath
+                    );
+
+                    // Write diff to temp file in workspace storage
+                    const storageDir = nova.extension.workspaceStoragePath;
+                    nova.fs.mkdir(storageDir);
+                    const shortHash = commit.hash.substring(0, 7);
+                    const baseName = nova.path.basename(item.path);
+                    const tempPath = nova.path.join(storageDir, `${baseName}-${shortHash}.diff`);
+
+                    const file = nova.fs.open(tempPath, "w");
+                    file.write(diffOutput || "No diff available (initial commit?)");
+                    file.close();
+
+                    nova.workspace.openFile(tempPath);
+                } catch (err) {
+                    console.error("Failed to get diff:", err.message);
+                }
+            });
+        })
+    );
+
+    // Quick open fresh file
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.quickOpen", () => {
+            if (!dataProvider) return;
+
+            // Collect all non-directory, non-deleted file items
+            const allFiles = [];
+            function collectFiles(items) {
+                for (const item of items) {
+                    if (item.isDirectory) {
+                        collectFiles(item.children);
+                    } else if (!item.isDeleted) {
+                        allFiles.push(item);
+                    }
+                }
+            }
+            collectFiles(dataProvider._rootItems);
+
+            if (allFiles.length === 0) return;
+
+            const choices = allFiles.map((f) => f.relativePath);
+
+            nova.workspace.showChoicePalette(choices, { placeholder: "Open Fresh File..." }, (choice, index) => {
+                if (choice === null || index === undefined) return;
+                nova.workspace.openFile(allFiles[index].path);
+            });
+        })
+    );
+
+    // Watch for file changes; allow git state files (index, HEAD, refs) through
     const watcher = nova.fs.watch("**/*", (path) => {
-        if (path && (path.includes("/.git/") || path.endsWith("/.git"))) return;
+        if (path && (path.includes("/.git/") || path.endsWith("/.git"))) {
+            // Only refresh on git state changes (commit, checkout, merge, etc.)
+            if (path.endsWith("/.git/index") || path.endsWith("/.git/HEAD") || path.includes("/.git/refs/")) {
+                debounceRefresh();
+            }
+            return;
+        }
         debounceRefresh();
     });
     nova.subscriptions.add(watcher);
@@ -201,6 +336,12 @@ exports.activate = function () {
 
     nova.subscriptions.add(
         nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.ignoredPatterns", () => {
+            doRefresh();
+        })
+    );
+
+    nova.subscriptions.add(
+        nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.pinnedFiles", () => {
             doRefresh();
         })
     );
@@ -220,4 +361,5 @@ exports.deactivate = function () {
     treeView = null;
     dataProvider = null;
     gitService = null;
+    fileSystemService = null;
 };

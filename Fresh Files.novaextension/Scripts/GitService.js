@@ -84,25 +84,28 @@ class GitService {
                 const absolutePath = nova.path.join(gitRoot, actualPath);
                 const relativePath = this._relativeTo(absolutePath, workspacePath);
 
+                // Detect deleted files
+                const isDeleted = statusCode === "D" || statusCode === "DD";
+
                 // Get mtime from filesystem
                 let mtime = null;
-                try {
-                    const stat = nova.fs.stat(absolutePath);
-                    if (stat) {
-                        mtime = stat.mtime;
+                if (!isDeleted) {
+                    try {
+                        const stat = nova.fs.stat(absolutePath);
+                        if (stat) {
+                            mtime = stat.mtime;
+                        }
+                    } catch (e) {
+                        // File may have been deleted
                     }
-                } catch (e) {
-                    // File may have been deleted
                 }
-
-                // Skip deleted files we can't stat
-                if (!mtime && (statusCode === "D" || statusCode === "DD")) continue;
 
                 files.push({
                     relativePath: relativePath,
                     absolutePath: absolutePath,
                     mtime: mtime || new Date(),
-                    status: statusCode
+                    status: statusCode,
+                    isDeleted: isDeleted
                 });
             }
 
@@ -163,7 +166,8 @@ class GitService {
                             relativePath: relativePath,
                             absolutePath: absolutePath,
                             mtime: currentDate,
-                            status: status
+                            status: status,
+                            isDeleted: status === "D"
                         });
                     }
                 }
@@ -172,6 +176,41 @@ class GitService {
             return Array.from(fileMap.values());
         } catch (err) {
             console.error("Failed to get historical files:", err.message);
+            return [];
+        }
+    }
+
+    async getFileHistory(workspacePath, filePath) {
+        try {
+            const gitRoot = await this.getGitRoot(workspacePath);
+            if (!gitRoot) return [];
+
+            const relativePath = this._relativeTo(filePath, gitRoot);
+
+            const output = await this.runProcess(
+                "/usr/bin/git",
+                ["log", "--format=%H%x09%aI%x09%s", "--follow", "-20", "--", relativePath],
+                workspacePath
+            );
+            if (!output.trim()) return [];
+
+            const commits = [];
+            const lines = output.split("\n").filter((l) => l.trim().length > 0);
+
+            for (const line of lines) {
+                const parts = line.split("\t");
+                if (parts.length >= 3) {
+                    commits.push({
+                        hash: parts[0],
+                        date: new Date(parts[1]),
+                        message: parts.slice(2).join("\t")
+                    });
+                }
+            }
+
+            return commits;
+        } catch (err) {
+            console.error("Failed to get file history:", err.message);
             return [];
         }
     }

@@ -1,16 +1,12 @@
-**Fresh Files** provides a sidebar that shows only recently modified files, using Git history to surface the files you're actively working on.
+**Fresh Files** provides a sidebar that shows only recently modified files, helping you focus on the files you're actively working on.
+
+In Git repositories it uses `git status` and `git log`. In non-Git workspaces it falls back to filesystem modification times, so it works in any folder.
 
 Ideal if the Files sidebar is too much, or you lose track of your work immediately after a commit.
 
 Inspired by [Fresh File Explorer](https://github.com/FreHu/vscode-fresh-file-explorer) for VS Code.
 
-## Requirements
-
-- A workspace that is a **Git repository** (Fresh Files uses `git status` and `git log`)
-
 ## Usage
-
-To use Fresh Files:
 
 1. Select the **View > Sidebars > Show All Sidebars** menu item
 2. Click the **Fresh Files** sidebar icon
@@ -30,26 +26,40 @@ For more frequent access you can drag the **Fresh Files** icon to:
 
 Fresh Files has two modes:
 
-- **Pending Changes** shows uncommitted files from `git status`
-- **Historical** shows files modified within a time window (1 hour, 4 hours, 1 day, 3/7/14/30/90/180 days) from `git log`
+- **Pending Changes** — in Git repos shows uncommitted files from `git status`; in non-Git workspaces shows files modified in the last day
+- **Historical** — shows files modified within a time window (1 hour to 180 days) using `git log` or filesystem timestamps
 
 ## Features
 
+- Works in any workspace — Git or non-Git
+- Pin files to keep them visible regardless of time window
+- Show File History for any file (Git repos only)
 - Directory tree with collapsed single-child directories
 - Flat list mode (default) showing filenames with relative path as tooltip
 - Sort by recency (newest first, default) or alphabetically
 - Layout and sort preferences remembered per workspace
 - Relative time display ("2h ago", "3d ago")
+- Deleted file indicators
 - File count on directories
 - Auto-refresh on file changes
 
 ## Context Menu
 
-Right-click on any file or directory to:
+Right-click on any file to:
 
 - Show in Finder
-- Copy Path
-- Copy Relative Path
+- Copy Path / Copy Relative Path
+- Pin File / Unpin File
+- Show File History (Git repos only)
+
+## Command Palette
+
+- Refresh Fresh Files
+- Set Time Window
+- Cycle Time Window
+- Toggle Sort Order
+- Toggle Layout (Flat/Tree)
+- Quick Open Fresh File
 
 ## Configuration
 
@@ -57,3 +67,4 @@ Per-workspace settings are available in **Project > Project Settings > Fresh Fil
 
 - **Time Window** — which time period to show
 - **Ignored Patterns** — glob patterns for files to hide
+- **Pinned Files** — files pinned to always appear in the sidebar
