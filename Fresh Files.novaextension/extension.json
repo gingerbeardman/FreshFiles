@@ -3,7 +3,7 @@
     "name": "Fresh Files",
     "organization": "gingerbeardman",
     "description": "An alternative file browser sidebar that shows only recently modified files",
-    "version": "1.0.2",
+    "version": "2.0.0",
     "bugs": "https://github.com/gingerbeardman/FreshFiles/issues",
     "homepage": "https://github.com/gingerbeardman/FreshFiles",
     "repository": "https://github.com/gingerbeardman/FreshFiles",
@@ -17,7 +17,7 @@
     ],
 
     "entitlements": {
-        "filesystem": "readonly",
+        "filesystem": "readwrite",
         "process": true
     },
 
@@ -37,7 +37,8 @@
                 ["14d", "Last 14 Days"],
                 ["30d", "Last 30 Days"],
                 ["90d", "Last 90 Days"],
-                ["180d", "Last 180 Days"]
+                ["180d", "Last 180 Days"],
+                ["360d", "Last 360 Days"]
             ],
             "default": "pending"
         },
@@ -45,6 +46,13 @@
             "key": "com.gingerbeardman.FreshFiles.ignoredPatterns",
             "title": "Ignored Patterns",
             "description": "Additional file patterns to ignore (one per line). Supports glob patterns.",
+            "type": "stringArray",
+            "default": []
+        },
+        {
+            "key": "com.gingerbeardman.FreshFiles.pinnedFiles",
+            "title": "Pinned Files",
+            "description": "Files pinned to always appear in the sidebar regardless of time window.",
             "type": "stringArray",
             "default": []
         }
@@ -60,7 +68,7 @@
                 {
                     "id": "com.gingerbeardman.FreshFiles.section",
                     "name": "Fresh Files",
-                    "placeholderText": "No recently modified files found.\nRequires a Git repository.",
+                    "placeholderText": "No recently modified files found.",
                     "placeholderImage": "sidebar-large",
                     "headerCommands": [
                         {
@@ -94,6 +102,24 @@
                         {
                             "title": "Copy Relative Path",
                             "command": "freshFiles.copyRelativePath"
+                        },
+                        {
+                            "separator": true
+                        },
+                        {
+                            "title": "Pin File",
+                            "command": "freshFiles.pinFile"
+                        },
+                        {
+                            "title": "Unpin File",
+                            "command": "freshFiles.unpinFile"
+                        },
+                        {
+                            "separator": true
+                        },
+                        {
+                            "title": "Show File History",
+                            "command": "freshFiles.showFileHistory"
                         }
                     ]
                 }
@@ -108,8 +134,24 @@
                 "command": "freshFiles.refresh"
             },
             {
-                "title": "Set Time Window...",
+                "title": "Set Time Window…",
                 "command": "freshFiles.setTimeWindow"
+            },
+            {
+                "title": "Cycle Time Window",
+                "command": "freshFiles.cycleTimeWindow"
+            },
+            {
+                "title": "Toggle Sort Order (Recency/Name)",
+                "command": "freshFiles.toggleSort"
+            },
+            {
+                "title": "Toggle Layout (Flat/Tree)",
+                "command": "freshFiles.toggleFlat"
+            },
+            {
+                "title": "Quick Open Fresh File…",
+                "command": "freshFiles.quickOpen"
             }
         ]
     }
