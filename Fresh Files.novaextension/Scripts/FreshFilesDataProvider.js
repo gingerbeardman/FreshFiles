@@ -9,6 +9,7 @@ class FreshFilesDataProvider {
         this._ignoredPatterns = [];
         this._flat = true;
         this._sortByName = false;
+        this._showAll = false;
     }
 
     getChildren(element) {
@@ -50,11 +51,11 @@ class FreshFilesDataProvider {
         }
 
         const item = new TreeItem(element.name, TreeItemCollapsibleState.None);
-        item.image = this._fileTypeImage(element.name);
         item.identifier = element.path;
         item.command = "freshFiles.open";
         item.contextValue = "file";
 
+        item.image = this._fileTypeImage(element.name);
         if (element.mtime) {
             item.descriptiveText = relativeTime(element.mtime);
         }
@@ -101,7 +102,9 @@ class FreshFilesDataProvider {
 
         let files;
         if (isGit) {
-            if (timeWindow === "pending") {
+            if (this._showAll) {
+                files = await this.gitService.getAllTrackedFiles(workspacePath);
+            } else if (timeWindow === "pending") {
                 files = await this.gitService.getPendingFiles(workspacePath);
             } else {
                 // Parse "1h", "4h", "1d", "3d" etc. into git --since argument
@@ -189,6 +192,8 @@ class FreshFilesDataProvider {
             const pinnedItems = this._buildFlatList(pinnedFiles);
             for (const pItem of pinnedItems) {
                 pItem.isPinned = true;
+            }
+            for (const pItem of pinnedItems) {
                 pinnedSection.addChild(pItem);
             }
 

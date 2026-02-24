@@ -23,6 +23,7 @@ For more frequent access you can drag the **Fresh Files** icon to:
 - **Sort** — toggle between most recent first and alphabetical order
 - **Flat/Tree** — toggle between a flat file list and a directory tree
 - **Time Window** — pick which time period to show
+- **Show All** — temporarily show all tracked files, overriding the time window
 
 ## Time Window
 
@@ -35,7 +36,14 @@ Fresh Files has two modes:
 
 - Works in any workspace — Git or non-Git
 - Pin files to keep them visible regardless of time window
+- Search Fresh Files from the command palette
 - Show File History for any file (Git repos only)
+- Diff Search (Pickaxe) — find commits where a string was added or removed
+- Line History — view git history for a line or selection
+- Exhume — view deleted file contents with syntax highlighting
+- Resurrect — restore deleted files to their original location
+- New File — create a new file from the sidebar
+- Show All Files — temporarily show all tracked files
 - Directory tree with collapsed single-child directories
 - Flat list mode (default) showing filenames with relative path as tooltip
 - Sort by recency (newest first, default) or alphabetically
@@ -49,10 +57,13 @@ Fresh Files has two modes:
 
 Right-click on any file to:
 
+- New File
 - Show in Finder
 - Copy Path / Copy Relative Path
 - Pin File / Unpin File
-- Show File History (Git repos only)
+- Show File History
+- Exhume / Resurrect (deleted files only)
+- Diff Search
 
 ## Command Palette
 
@@ -62,6 +73,9 @@ Right-click on any file to:
 - Toggle Sort Order
 - Toggle Layout (Flat/Tree)
 - Quick Open Fresh File
+- Search Fresh Files
+- Diff Search (Pickaxe)
+- Line History
 
 ## Configuration
 

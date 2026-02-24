@@ -224,6 +224,180 @@ class GitService {
         return absolutePath;
     }
 
+    async getAllTrackedFiles(workspacePath) {
+        try {
+            const gitRoot = await this.getGitRoot(workspacePath);
+            if (!gitRoot) return [];
+
+            const output = await this.runProcess(
+                "/usr/bin/git",
+                ["ls-files", "--full-name"],
+                gitRoot
+            );
+            if (!output.trim()) return [];
+
+            const files = [];
+            const lines = output.split("\n").filter((l) => l.length > 0);
+
+            for (const filePath of lines) {
+                const absolutePath = nova.path.join(gitRoot, filePath);
+                const relativePath = this._relativeTo(absolutePath, workspacePath);
+
+                let mtime = null;
+                try {
+                    const stat = nova.fs.stat(absolutePath);
+                    if (stat) {
+                        mtime = stat.mtime;
+                    }
+                } catch (e) {
+                    // File may not exist on disk
+                }
+
+                files.push({
+                    relativePath: relativePath,
+                    absolutePath: absolutePath,
+                    mtime: mtime || new Date(),
+                    status: null,
+                    isDeleted: false
+                });
+            }
+
+            return files;
+        } catch (err) {
+            console.error("Failed to get all tracked files:", err.message);
+            return [];
+        }
+    }
+
+    async getDeletedFileContent(workspacePath, relativePath, isPending) {
+        try {
+            const gitRoot = await this.getGitRoot(workspacePath);
+            if (!gitRoot) return null;
+
+            const relToRoot = this._relativeTo(
+                nova.path.join(workspacePath, relativePath),
+                gitRoot
+            );
+
+            if (isPending) {
+                // Pending delete: file still exists at HEAD
+                return await this.runProcess(
+                    "/usr/bin/git",
+                    ["show", `HEAD:${relToRoot}`],
+                    gitRoot
+                );
+            } else {
+                // Historical delete: find the commit that deleted it, then show from its parent
+                const hashOutput = await this.runProcess(
+                    "/usr/bin/git",
+                    ["log", "--diff-filter=D", "-1", "--format=%H", "--", relToRoot],
+                    gitRoot
+                );
+                const hash = hashOutput.trim();
+                if (!hash) return null;
+
+                return await this.runProcess(
+                    "/usr/bin/git",
+                    ["show", `${hash}~1:${relToRoot}`],
+                    gitRoot
+                );
+            }
+        } catch (err) {
+            console.error("Failed to get deleted file content:", err.message);
+            return null;
+        }
+    }
+
+    async restoreDeletedFilePending(workspacePath, relativePath) {
+        try {
+            const gitRoot = await this.getGitRoot(workspacePath);
+            if (!gitRoot) return false;
+
+            const relToRoot = this._relativeTo(
+                nova.path.join(workspacePath, relativePath),
+                gitRoot
+            );
+
+            await this.runProcess(
+                "/usr/bin/git",
+                ["checkout", "HEAD", "--", relToRoot],
+                gitRoot
+            );
+            return true;
+        } catch (err) {
+            console.error("Failed to restore deleted file:", err.message);
+            return false;
+        }
+    }
+
+    async pickaxeSearch(workspacePath, searchString, filePath) {
+        try {
+            const gitRoot = await this.getGitRoot(workspacePath);
+            if (!gitRoot) return [];
+
+            const args = ["log", `-S${searchString}`, "--format=%H%x09%aI%x09%s", "-20"];
+            if (filePath) {
+                const relToRoot = this._relativeTo(filePath, gitRoot);
+                args.push("--", relToRoot);
+            }
+
+            const output = await this.runProcess("/usr/bin/git", args, gitRoot);
+            if (!output.trim()) return [];
+
+            const commits = [];
+            const lines = output.split("\n").filter((l) => l.trim().length > 0);
+
+            for (const line of lines) {
+                const parts = line.split("\t");
+                if (parts.length >= 3) {
+                    commits.push({
+                        hash: parts[0],
+                        date: new Date(parts[1]),
+                        message: parts.slice(2).join("\t")
+                    });
+                }
+            }
+
+            return commits;
+        } catch (err) {
+            console.error("Failed to run pickaxe search:", err.message);
+            return [];
+        }
+    }
+
+    async getPickaxeDiff(workspacePath, commitHash, searchString) {
+        try {
+            const output = await this.runProcess(
+                "/usr/bin/git",
+                ["diff", `${commitHash}~1`, commitHash, `-S${searchString}`],
+                workspacePath
+            );
+            return output;
+        } catch (err) {
+            console.error("Failed to get pickaxe diff:", err.message);
+            return null;
+        }
+    }
+
+    async getLineHistory(workspacePath, filePath, startLine, endLine) {
+        try {
+            const gitRoot = await this.getGitRoot(workspacePath);
+            if (!gitRoot) return null;
+
+            const relToRoot = this._relativeTo(filePath, gitRoot);
+
+            const output = await this.runProcess(
+                "/usr/bin/git",
+                ["log", "-n", "20", `-L${startLine},${endLine}:${relToRoot}`],
+                gitRoot
+            );
+            return output;
+        } catch (err) {
+            console.error("Failed to get line history:", err.message);
+            return null;
+        }
+    }
+
     clearCache() {
         this._gitRoot = null;
         this._gitRootWorkspace = null;

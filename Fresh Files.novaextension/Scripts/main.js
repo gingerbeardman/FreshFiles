@@ -64,6 +64,92 @@ function getCurrentTimeWindow() {
     return nova.workspace.config.get("com.gingerbeardman.FreshFiles.timeWindow", "string") || "pending";
 }
 
+const SYNTAX_MAP = {
+    ".js": "javascript", ".jsx": "jsx", ".ts": "typescript", ".tsx": "tsx",
+    ".json": "json", ".html": "html", ".htm": "html", ".css": "css",
+    ".scss": "scss", ".less": "less", ".py": "python", ".rb": "ruby",
+    ".swift": "swift", ".m": "objc", ".mm": "objcpp", ".h": "objc",
+    ".c": "c", ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp",
+    ".java": "java", ".kt": "kotlin", ".go": "go", ".rs": "rust",
+    ".php": "php", ".lua": "lua", ".pl": "perl", ".sh": "shell",
+    ".bash": "shell", ".zsh": "shell", ".xml": "xml", ".yaml": "yaml",
+    ".yml": "yaml", ".toml": "toml", ".md": "markdown", ".markdown": "markdown",
+    ".sql": "sql", ".r": "r", ".R": "r", ".dart": "dart",
+    ".ex": "elixir", ".exs": "elixir", ".erl": "erlang",
+    ".hs": "haskell", ".scala": "scala", ".clj": "clojure",
+    ".vim": "viml", ".diff": "diff", ".patch": "diff",
+    ".ini": "ini", ".cfg": "ini", ".conf": "ini"
+};
+
+function syntaxForPath(filePath) {
+    const ext = nova.path.extname(filePath);
+    return ext ? (SYNTAX_MAP[ext] || null) : null;
+}
+
+function _ensureDirectoryExists(dirPath) {
+    if (nova.fs.stat(dirPath)) return;
+    const parts = [];
+    let current = dirPath;
+    while (!nova.fs.stat(current)) {
+        parts.unshift(current);
+        current = nova.path.dirname(current);
+    }
+    for (const dir of parts) {
+        nova.fs.mkdir(dir);
+    }
+}
+
+async function _performDiffSearch(filePath) {
+    const workspacePath = nova.workspace.path;
+    if (!workspacePath) return;
+
+    if (!gitService || !gitService.isGitRepo) {
+        nova.workspace.showInformativeMessage("Diff Search requires a Git repository.");
+        return;
+    }
+
+    const scope = filePath ? nova.path.basename(filePath) : "repo";
+
+    nova.workspace.showInputPalette(`Search string (in ${scope})…`, { placeholder: "Enter text to search for" }, async (searchString) => {
+        if (!searchString) return;
+
+        const commits = await gitService.pickaxeSearch(workspacePath, searchString, filePath);
+        if (commits.length === 0) {
+            nova.workspace.showWarningMessage(`No commits found where "${searchString}" was added or removed.`);
+            return;
+        }
+
+        const choices = commits.map((c) => {
+            const shortHash = c.hash.substring(0, 7);
+            const age = relativeTime(c.date);
+            return `${shortHash} — ${c.message} (${age})`;
+        });
+
+        nova.workspace.showChoicePalette(choices, { placeholder: "Select a commit" }, async (choice, index) => {
+            if (choice === null || index === undefined) return;
+
+            const commit = commits[index];
+            try {
+                const diffOutput = await gitService.getPickaxeDiff(workspacePath, commit.hash, searchString);
+
+                const storageDir = nova.extension.workspaceStoragePath;
+                nova.fs.mkdir(storageDir);
+                const shortHash = commit.hash.substring(0, 7);
+                const safeName = searchString.replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 30);
+                const tempPath = nova.path.join(storageDir, `pickaxe-${safeName}-${shortHash}.diff`);
+
+                const file = nova.fs.open(tempPath, "w");
+                file.write(diffOutput || "No diff available.");
+                file.close();
+
+                nova.workspace.openFile(tempPath);
+            } catch (err) {
+                console.error("Failed to get pickaxe diff:", err.message);
+            }
+        });
+    });
+}
+
 exports.activate = function () {
     gitService = new GitService();
     fileSystemService = new FileSystemService();
@@ -72,8 +158,10 @@ exports.activate = function () {
     // Restore persisted layout and sort preferences
     const savedFlat = nova.workspace.config.get("com.gingerbeardman.FreshFiles.flatLayout", "boolean");
     const savedSort = nova.workspace.config.get("com.gingerbeardman.FreshFiles.sortByName", "boolean");
+    const savedShowAll = nova.workspace.config.get("com.gingerbeardman.FreshFiles.showAll", "boolean");
     if (savedFlat !== null) dataProvider._flat = savedFlat;
     if (savedSort !== null) dataProvider._sortByName = savedSort;
+    if (savedShowAll !== null) dataProvider._showAll = savedShowAll;
 
     treeView = new TreeView("com.gingerbeardman.FreshFiles.section", {
         dataProvider: dataProvider
@@ -224,6 +312,49 @@ exports.activate = function () {
         })
     );
 
+    // Search in Fresh Files
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.searchFiles", () => {
+            if (!dataProvider) return;
+
+            // Collect all non-directory, non-deleted file items
+            const allFiles = [];
+            function collectFiles(items) {
+                for (const item of items) {
+                    if (item.isDirectory) {
+                        collectFiles(item.children);
+                    } else if (!item.isDeleted) {
+                        allFiles.push(item);
+                    }
+                }
+            }
+            collectFiles(dataProvider._rootItems);
+
+            if (allFiles.length === 0) {
+                nova.workspace.showInformativeMessage("No files to search.");
+                return;
+            }
+
+            nova.workspace.showInputPalette("Search Fresh Files…", { placeholder: "Enter filename to search" }, (query) => {
+                if (!query) return;
+
+                const lowerQuery = query.toLowerCase();
+                const matches = allFiles.filter((f) => f.relativePath.toLowerCase().includes(lowerQuery));
+
+                if (matches.length === 0) {
+                    nova.workspace.showInformativeMessage(`No files matching "${query}".`);
+                    return;
+                }
+
+                const choices = matches.map((f) => f.relativePath);
+                nova.workspace.showChoicePalette(choices, { placeholder: `${matches.length} match${matches.length !== 1 ? "es" : ""}` }, (choice, index) => {
+                    if (choice === null || index === undefined) return;
+                    nova.workspace.openFile(matches[index].path);
+                });
+            });
+        })
+    );
+
     // Show file history command
     nova.subscriptions.add(
         nova.commands.register("freshFiles.showFileHistory", async () => {
@@ -285,6 +416,177 @@ exports.activate = function () {
         })
     );
 
+    // Exhume — view deleted file content
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.exhume", async () => {
+            const selection = treeView.selection;
+            if (!selection || selection.length === 0) return;
+            const item = selection[0];
+            if (!item.isDeleted) return;
+
+            const workspacePath = nova.workspace.path;
+            if (!workspacePath) return;
+
+            if (!gitService.isGitRepo) {
+                nova.workspace.showInformativeMessage("Exhume requires a Git repository.");
+                return;
+            }
+
+            const isPending = getCurrentTimeWindow() === "pending";
+            const content = await gitService.getDeletedFileContent(workspacePath, item.relativePath, isPending);
+            if (content === null) {
+                nova.workspace.showWarningMessage("Could not retrieve content for this deleted file.");
+                return;
+            }
+
+            // Write to temp file with original name for syntax detection
+            const storageDir = nova.extension.workspaceStoragePath;
+            nova.fs.mkdir(storageDir);
+            const baseName = nova.path.basename(item.relativePath);
+            const tempPath = nova.path.join(storageDir, `exhumed-${baseName}`);
+
+            const file = nova.fs.open(tempPath, "w");
+            file.write(content);
+            file.close();
+
+            const editor = await nova.workspace.openFile(tempPath);
+            if (editor) {
+                const syntax = syntaxForPath(item.relativePath);
+                if (syntax) {
+                    editor.syntax = syntax;
+                }
+            }
+        })
+    );
+
+    // Resurrect — restore deleted file to disk
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.resurrect", async () => {
+            const selection = treeView.selection;
+            if (!selection || selection.length === 0) return;
+            const item = selection[0];
+            if (!item.isDeleted) return;
+
+            const workspacePath = nova.workspace.path;
+            if (!workspacePath) return;
+
+            if (!gitService.isGitRepo) {
+                nova.workspace.showInformativeMessage("Resurrect requires a Git repository.");
+                return;
+            }
+
+            const isPending = getCurrentTimeWindow() === "pending";
+
+            if (isPending) {
+                const success = await gitService.restoreDeletedFilePending(workspacePath, item.relativePath);
+                if (success) {
+                    doRefresh();
+                } else {
+                    nova.workspace.showWarningMessage("Failed to restore the deleted file.");
+                }
+            } else {
+                // Historical: get content and write to disk
+                const targetPath = nova.path.join(workspacePath, item.relativePath);
+
+                // Check if file already exists
+                if (nova.fs.stat(targetPath)) {
+                    nova.workspace.showWarningMessage("A file already exists at this path. Cannot overwrite.");
+                    return;
+                }
+
+                const content = await gitService.getDeletedFileContent(workspacePath, item.relativePath, false);
+                if (content === null) {
+                    nova.workspace.showWarningMessage("Could not retrieve content for this deleted file.");
+                    return;
+                }
+
+                // Ensure parent directory exists
+                _ensureDirectoryExists(nova.path.dirname(targetPath));
+
+                const file = nova.fs.open(targetPath, "w");
+                file.write(content);
+                file.close();
+
+                doRefresh();
+            }
+        })
+    );
+
+    // Diff Search — scoped to selected file from sidebar
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.diffSearch", async () => {
+            const selection = treeView.selection;
+            let filePath = null;
+            if (selection && selection.length > 0) {
+                const item = selection[0];
+                if (!item.isDirectory) {
+                    filePath = item.path;
+                }
+            }
+            await _performDiffSearch(filePath);
+        })
+    );
+
+    // Diff Search (Repo-wide) — from command palette
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.diffSearchRepo", async () => {
+            await _performDiffSearch(null);
+        })
+    );
+
+    // Line History — from command palette, uses active editor
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.lineHistory", async () => {
+            const editor = nova.workspace.activeTextEditor;
+            if (!editor) {
+                nova.workspace.showInformativeMessage("No active editor. Open a file first.");
+                return;
+            }
+
+            const workspacePath = nova.workspace.path;
+            if (!workspacePath) return;
+
+            if (!gitService || !gitService.isGitRepo) {
+                nova.workspace.showInformativeMessage("Line History requires a Git repository.");
+                return;
+            }
+
+            const filePath = editor.document.path;
+            if (!filePath) {
+                nova.workspace.showInformativeMessage("This file has no path (unsaved).");
+                return;
+            }
+
+            const selectedRange = editor.selectedRange;
+            const fullText = editor.document.getTextInRange(new Range(0, editor.document.length));
+
+            // Convert character offsets to line numbers
+            const textBeforeStart = fullText.substring(0, selectedRange.start);
+            const startLine = (textBeforeStart.match(/\n/g) || []).length + 1;
+
+            const textBeforeEnd = fullText.substring(0, selectedRange.end);
+            const endLine = (textBeforeEnd.match(/\n/g) || []).length + 1;
+
+            const output = await gitService.getLineHistory(workspacePath, filePath, startLine, endLine);
+            if (!output || !output.trim()) {
+                nova.workspace.showWarningMessage("No line history found. The file may be untracked.");
+                return;
+            }
+
+            const storageDir = nova.extension.workspaceStoragePath;
+            nova.fs.mkdir(storageDir);
+            const baseName = nova.path.basename(filePath);
+            const lineLabel = startLine === endLine ? `L${startLine}` : `L${startLine}-${endLine}`;
+            const tempPath = nova.path.join(storageDir, `${baseName}-${lineLabel}-history.diff`);
+
+            const file = nova.fs.open(tempPath, "w");
+            file.write(output);
+            file.close();
+
+            nova.workspace.openFile(tempPath);
+        })
+    );
+
     // Quick open fresh file
     nova.subscriptions.add(
         nova.commands.register("freshFiles.quickOpen", () => {
@@ -311,6 +613,53 @@ exports.activate = function () {
                 if (choice === null || index === undefined) return;
                 nova.workspace.openFile(allFiles[index].path);
             });
+        })
+    );
+
+    // New File — create a new file in the selected directory or workspace root
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.newFile", () => {
+            const workspacePath = nova.workspace.path;
+            if (!workspacePath) return;
+
+            // Determine target directory from selection
+            let targetDir = workspacePath;
+            const selection = treeView.selection;
+            if (selection && selection.length > 0) {
+                const item = selection[0];
+                if (item.isDirectory) {
+                    targetDir = item.path;
+                } else if (item.path) {
+                    targetDir = nova.path.dirname(item.path);
+                }
+            }
+
+            nova.workspace.showInputPalette("New file name:", { placeholder: "filename.ext" }, (name) => {
+                if (!name) return;
+                const newPath = nova.path.join(targetDir, name);
+
+                if (nova.fs.stat(newPath)) {
+                    nova.workspace.showWarningMessage("A file already exists at this path.");
+                    return;
+                }
+
+                _ensureDirectoryExists(nova.path.dirname(newPath));
+                const file = nova.fs.open(newPath, "w");
+                file.write("");
+                file.close();
+
+                nova.workspace.openFile(newPath);
+            });
+        })
+    );
+
+    // Toggle Show All Files — temporarily show all tracked files
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.toggleShowAll", () => {
+            if (!dataProvider) return;
+            dataProvider._showAll = !dataProvider._showAll;
+            nova.workspace.config.set("com.gingerbeardman.FreshFiles.showAll", dataProvider._showAll);
+            doRefresh();
         })
     );
 

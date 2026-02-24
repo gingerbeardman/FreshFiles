@@ -3,7 +3,7 @@
     "name": "Fresh Files",
     "organization": "gingerbeardman",
     "description": "An alternative file browser sidebar that shows only recently modified files",
-    "version": "2.0.3",
+    "version": "3.0.0",
     "bugs": "https://github.com/gingerbeardman/FreshFiles/issues",
     "homepage": "https://github.com/gingerbeardman/FreshFiles",
     "repository": "https://github.com/gingerbeardman/FreshFiles",
@@ -89,9 +89,22 @@
                             "image": "__builtin.action",
                             "tooltip": "Set time window",
                             "command": "freshFiles.setTimeWindow"
+                        },
+                        {
+                            "title": "Show All",
+                            "image": "__builtin.eye",
+                            "tooltip": "Toggle show all tracked files",
+                            "command": "freshFiles.toggleShowAll"
                         }
                     ],
                     "contextCommands": [
+                        {
+                            "title": "New File…",
+                            "command": "freshFiles.newFile"
+                        },
+                        {
+                            "separator": true
+                        },
                         {
                             "title": "Show in Finder",
                             "command": "freshFiles.revealInFinder"
@@ -121,6 +134,23 @@
                         {
                             "title": "Show File History",
                             "command": "freshFiles.showFileHistory"
+                        },
+                        {
+                            "separator": true
+                        },
+                        {
+                            "title": "Exhume (View Deleted)",
+                            "command": "freshFiles.exhume",
+                            "when": "viewItem == 'deleted'"
+                        },
+                        {
+                            "title": "Resurrect (Restore Deleted)",
+                            "command": "freshFiles.resurrect",
+                            "when": "viewItem == 'deleted'"
+                        },
+                        {
+                            "title": "Diff Search…",
+                            "command": "freshFiles.diffSearch"
                         }
                     ]
                 }
@@ -153,6 +183,18 @@
             {
                 "title": "Quick Open Fresh File…",
                 "command": "freshFiles.quickOpen"
+            },
+            {
+                "title": "Diff Search (Pickaxe)…",
+                "command": "freshFiles.diffSearchRepo"
+            },
+            {
+                "title": "Line History…",
+                "command": "freshFiles.lineHistory"
+            },
+            {
+                "title": "Search Fresh Files…",
+                "command": "freshFiles.searchFiles"
             }
         ]
     }
