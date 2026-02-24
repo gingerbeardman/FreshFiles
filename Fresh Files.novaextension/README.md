@@ -4,6 +4,8 @@ In Git repositories it uses `git status` and `git log`. In non-Git workspaces it
 
 Ideal if the Files sidebar is too much, or you lose track of your work immediately after a commit.
 
+![](https://raw.githubusercontent.com/gingerbeardman/FreshFiles/refs/heads/main/screenshot.png)
+
 Inspired by [Fresh File Explorer](https://github.com/FreHu/vscode-fresh-file-explorer) for VS Code.
 
 ## Usage

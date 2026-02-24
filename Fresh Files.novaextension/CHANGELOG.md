@@ -12,6 +12,7 @@
 - fix: sidebar now refreshes after external git commits, checkouts, and merges
 - remove: deleted unused layout sidebar button icon
 - chore: relicense to LGPL-3.0
+- chore: add screenshot
 
 ## Version 1.0.x
 
