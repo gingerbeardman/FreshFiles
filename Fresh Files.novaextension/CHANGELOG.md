@@ -1,4 +1,4 @@
-## Version 3.0.x
+## Version 3.0.1
 
 - add: Exhume — view deleted file contents with syntax highlighting (context menu on deleted files)
 - add: Resurrect — restore deleted files to their original location (pending via git checkout, historical via write-to-disk)
@@ -6,8 +6,8 @@
 - add: Line History — view git history for the current line or selection from the command palette
 - add: New File — create a new file from the sidebar context menu
 - add: Show All Files — toggle to temporarily show all tracked files, overriding the time window filter
-- add: Search Fresh Files — search the current file list by filename from the command palette
-
+- add: Search Fresh Files — full-text search across fresh files from the command palette
+- add: Move to Trash — delete files from disk via the sidebar context menu
 
 ## Version 2.0.x
 

@@ -36,12 +36,13 @@ Fresh Files has two modes:
 
 - Works in any workspace — Git or non-Git
 - Pin files to keep them visible regardless of time window
-- Search Fresh Files from the command palette
+- Search Fresh Files — full-text search across fresh files from the command palette
 - Show File History for any file (Git repos only)
 - Diff Search (Pickaxe) — find commits where a string was added or removed
 - Line History — view git history for a line or selection
 - Exhume — view deleted file contents with syntax highlighting
 - Resurrect — restore deleted files to their original location
+- Move to Trash — delete files from the sidebar context menu
 - New File — create a new file from the sidebar
 - Show All Files — temporarily show all tracked files
 - Directory tree with collapsed single-child directories
@@ -58,6 +59,7 @@ Fresh Files has two modes:
 Right-click on any file to:
 
 - New File
+- Move to Trash
 - Show in Finder
 - Copy Path / Copy Relative Path
 - Pin File / Unpin File

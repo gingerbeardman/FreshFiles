@@ -279,6 +279,31 @@ exports.activate = function () {
         })
     );
 
+    // Move to Trash command
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.moveToTrash", () => {
+            const selection = treeView.selection;
+            if (!selection || selection.length === 0) return;
+            const item = selection[0];
+            if (item.isDirectory || item.isDeleted) return;
+
+            const fileName = nova.path.basename(item.path);
+            const escaped = item.path.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+            const script = `tell application "Finder" to delete (POSIX file "${escaped}" as alias)`;
+            const process = new Process("/usr/bin/osascript", {
+                args: ["-e", script]
+            });
+            process.onDidExit((status) => {
+                if (status === 0) {
+                    doRefresh();
+                } else {
+                    nova.workspace.showWarningMessage(`Failed to move "${fileName}" to Trash.`);
+                }
+            });
+            process.start();
+        })
+    );
+
     // Pin file command
     nova.subscriptions.add(
         nova.commands.register("freshFiles.pinFile", () => {
@@ -312,12 +337,11 @@ exports.activate = function () {
         })
     );
 
-    // Search in Fresh Files
+    // Search file contents in Fresh Files
     nova.subscriptions.add(
         nova.commands.register("freshFiles.searchFiles", () => {
             if (!dataProvider) return;
 
-            // Collect all non-directory, non-deleted file items
             const allFiles = [];
             function collectFiles(items) {
                 for (const item of items) {
@@ -331,23 +355,42 @@ exports.activate = function () {
             collectFiles(dataProvider._rootItems);
 
             if (allFiles.length === 0) {
-                nova.workspace.showInformativeMessage("No files to search.");
+                nova.workspace.showInformativeMessage("No fresh files to search.");
                 return;
             }
 
-            nova.workspace.showInputPalette("Search Fresh Files…", { placeholder: "Enter filename to search" }, (query) => {
+            nova.workspace.showInputPalette("Search Fresh Files…", { placeholder: "Search text in fresh files" }, async (query) => {
                 if (!query) return;
 
-                const lowerQuery = query.toLowerCase();
-                const matches = allFiles.filter((f) => f.relativePath.toLowerCase().includes(lowerQuery));
+                const filePaths = allFiles.map((f) => f.path);
+                const args = ["-r", "-l", "-i", "--include-from=-", "--", query];
 
-                if (matches.length === 0) {
-                    nova.workspace.showInformativeMessage(`No files matching "${query}".`);
+                // Use grep with file list piped via stdin isn't viable,
+                // so pass file paths as arguments directly
+                const grepArgs = ["-l", "-i", "--", query].concat(filePaths);
+                const process = new Process("/usr/bin/grep", { args: grepArgs });
+
+                let output = "";
+                process.onStdout((line) => { output += line; });
+
+                const exitPromise = new Promise((resolve) => {
+                    process.onDidExit((status) => resolve(status));
+                });
+                process.start();
+                await exitPromise;
+
+                const matchingPaths = output.trim().split("\n").filter(Boolean);
+                if (matchingPaths.length === 0) {
+                    nova.workspace.showInformativeMessage(`No fresh files contain "${query}".`);
                     return;
                 }
 
+                // Map back to file items for display
+                const pathSet = new Set(matchingPaths);
+                const matches = allFiles.filter((f) => pathSet.has(f.path));
+
                 const choices = matches.map((f) => f.relativePath);
-                nova.workspace.showChoicePalette(choices, { placeholder: `${matches.length} match${matches.length !== 1 ? "es" : ""}` }, (choice, index) => {
+                nova.workspace.showChoicePalette(choices, { placeholder: `${matches.length} file${matches.length !== 1 ? "s contain" : " contains"} "${query}"` }, (choice, index) => {
                     if (choice === null || index === undefined) return;
                     nova.workspace.openFile(matches[index].path);
                 });
@@ -609,7 +652,7 @@ exports.activate = function () {
 
             const choices = allFiles.map((f) => f.relativePath);
 
-            nova.workspace.showChoicePalette(choices, { placeholder: "Open Fresh File..." }, (choice, index) => {
+            nova.workspace.showChoicePalette(choices, { placeholder: "Open Fresh File…" }, (choice, index) => {
                 if (choice === null || index === undefined) return;
                 nova.workspace.openFile(allFiles[index].path);
             });
