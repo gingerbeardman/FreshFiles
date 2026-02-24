@@ -10,6 +10,7 @@
 - change: skip common non-project directories (node_modules, build, .git, etc.) during filesystem scan
 - change: sidebar icons have been redone to match extension icon and are now antialiased
 - fix: sidebar now refreshes after external git commits, checkouts, and merges
+- fix: add missing clipboard entitlement for copy path commands
 - remove: deleted unused layout sidebar button icon
 - chore: relicense to LGPL-3.0
 - chore: add screenshot
