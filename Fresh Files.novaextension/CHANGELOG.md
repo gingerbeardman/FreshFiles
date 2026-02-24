@@ -1,4 +1,4 @@
-## Version 3.0.1
+## Version 3.0.x
 
 - add: Exhume — view deleted file contents with syntax highlighting (context menu on deleted files)
 - add: Resurrect — restore deleted files to their original location (pending via git checkout, historical via write-to-disk)
