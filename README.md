@@ -14,4 +14,4 @@ See the internal [README](/Fresh%20Files.novaextension/README.md) for more info.
 
 ## Licence
 
-[MIT](/LICENSE)
+[LGPL-3.0](/LICENSE)
