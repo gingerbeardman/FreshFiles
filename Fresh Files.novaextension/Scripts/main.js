@@ -337,6 +337,63 @@ exports.activate = function () {
         })
     );
 
+    // Add to Ignored command
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.addToIgnored", () => {
+            const selection = treeView.selection;
+            if (!selection || selection.length === 0) return;
+            const item = selection[0];
+
+            const pattern = item.isDirectory
+                ? `${item.relativePath}/*`
+                : item.relativePath;
+
+            const ignoredPatterns = nova.workspace.config.get("com.gingerbeardman.FreshFiles.ignoredPatterns", "stringArray") || [];
+            if (!ignoredPatterns.includes(pattern)) {
+                ignoredPatterns.push(pattern);
+                nova.workspace.config.set("com.gingerbeardman.FreshFiles.ignoredPatterns", ignoredPatterns);
+            }
+        })
+    );
+
+    // Add to .gitignore command
+    nova.subscriptions.add(
+        nova.commands.register("freshFiles.addToGitignore", () => {
+            const selection = treeView.selection;
+            if (!selection || selection.length === 0) return;
+            const item = selection[0];
+
+            const workspacePath = nova.workspace.path;
+            if (!workspacePath) return;
+
+            const pattern = item.isDirectory
+                ? `${item.relativePath}/`
+                : item.relativePath;
+
+            const gitignorePath = nova.path.join(workspacePath, ".gitignore");
+            let contents = "";
+            try {
+                const file = nova.fs.open(gitignorePath, "r");
+                contents = file.read() || "";
+                file.close();
+            } catch (e) {
+                // File doesn't exist yet, start fresh
+            }
+
+            // Check if pattern already present
+            const lines = contents.split("\n");
+            if (lines.some((line) => line.trim() === pattern)) return;
+
+            // Append pattern with a trailing newline
+            const separator = contents.length > 0 && !contents.endsWith("\n") ? "\n" : "";
+            const file = nova.fs.open(gitignorePath, "w");
+            file.write(contents + separator + pattern + "\n");
+            file.close();
+
+            doRefresh();
+        })
+    );
+
     // Search file contents in Fresh Files
     nova.subscriptions.add(
         nova.commands.register("freshFiles.searchFiles", () => {

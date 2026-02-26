@@ -3,7 +3,7 @@
     "name": "Fresh Files",
     "organization": "gingerbeardman",
     "description": "An alternative file browser sidebar that shows only recently modified files",
-    "version": "3.0.1",
+    "version": "3.0.2",
     "bugs": "https://github.com/gingerbeardman/FreshFiles/issues",
     "homepage": "https://github.com/gingerbeardman/FreshFiles",
     "repository": "https://github.com/gingerbeardman/FreshFiles",
@@ -134,6 +134,17 @@
                         {
                             "title": "Unpin File",
                             "command": "freshFiles.unpinFile"
+                        },
+                        {
+                            "separator": true
+                        },
+                        {
+                            "title": "Add to Ignored",
+                            "command": "freshFiles.addToIgnored"
+                        },
+                        {
+                            "title": "Add to .gitignore",
+                            "command": "freshFiles.addToGitignore"
                         },
                         {
                             "separator": true

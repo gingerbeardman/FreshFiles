@@ -50,6 +50,8 @@ Fresh Files has two modes:
 - Sort by recency (newest first, default) or alphabetically
 - Layout and sort preferences remembered per workspace
 - Relative time display ("2h ago", "3d ago")
+- Add to Ignored — quickly hide files or folders from the sidebar via ignored patterns
+- Add to .gitignore — append files or folders to your .gitignore from the context menu
 - Deleted file indicators
 - File count on directories
 - Auto-refresh on file changes
@@ -63,6 +65,7 @@ Right-click on any file to:
 - Show in Finder
 - Copy Path / Copy Relative Path
 - Pin File / Unpin File
+- Add to Ignored / Add to .gitignore
 - Show File History
 - Exhume / Resurrect (deleted files only)
 - Diff Search

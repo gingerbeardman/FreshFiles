@@ -8,6 +8,7 @@
 - add: Show All Files — toggle to temporarily show all tracked files, overriding the time window filter
 - add: Search Fresh Files — full-text search across fresh files from the command palette
 - add: Move to Trash — delete files from disk via the sidebar context menu
+- add: context menu options to ignore files and folders via "Add to Ignored" or "Add to .gitignore"
 
 ## Version 2.0.x
 
