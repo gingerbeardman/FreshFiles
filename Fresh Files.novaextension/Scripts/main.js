@@ -285,22 +285,83 @@ exports.activate = function () {
             const selection = treeView.selection;
             if (!selection || selection.length === 0) return;
             const item = selection[0];
-            if (item.isDirectory || item.isDeleted) return;
+            if (item.isDeleted) return;
 
-            const fileName = nova.path.basename(item.path);
-            const escaped = item.path.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-            const script = `tell application "Finder" to delete (POSIX file "${escaped}" as alias)`;
-            const process = new Process("/usr/bin/osascript", {
-                args: ["-e", script]
-            });
-            process.onDidExit((status) => {
-                if (status === 0) {
-                    doRefresh();
+            if (item.isDirectory) {
+                // Collect all changed file paths under this folder
+                const filePaths = [];
+                const collectFiles = (node) => {
+                    if (node.isDirectory) {
+                        for (const child of node.children) {
+                            collectFiles(child);
+                        }
+                    } else if (!node.isDeleted) {
+                        filePaths.push(node.path);
+                    }
+                };
+                collectFiles(item);
+                if (filePaths.length === 0) return;
+
+                // Count all files on disk under this folder
+                const changedSet = new Set(filePaths);
+                const countNonChanged = (dirPath) => {
+                    let count = 0;
+                    try {
+                        const entries = nova.fs.listdir(dirPath);
+                        for (const entry of entries) {
+                            if (entry.startsWith(".")) continue;
+                            const fullPath = nova.path.join(dirPath, entry);
+                            const stat = nova.fs.stat(fullPath);
+                            if (stat && stat.isDirectory()) {
+                                count += countNonChanged(fullPath);
+                            } else if (!changedSet.has(fullPath)) {
+                                count++;
+                            }
+                        }
+                    } catch (e) {}
+                    return count;
+                };
+
+                // If no other files exist, trash the whole folder; otherwise just the files
+                let trashTargets;
+                if (countNonChanged(item.path) === 0) {
+                    trashTargets = [item.path];
                 } else {
-                    nova.workspace.showWarningMessage(`Failed to move "${fileName}" to Trash.`);
+                    trashTargets = filePaths;
                 }
-            });
-            process.start();
+
+                const aliases = trashTargets.map(p => {
+                    const escaped = p.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+                    return `(POSIX file "${escaped}" as alias)`;
+                });
+                const script = `tell application "Finder" to delete {${aliases.join(", ")}}`;
+                const process = new Process("/usr/bin/osascript", {
+                    args: ["-e", script]
+                });
+                process.onDidExit((status) => {
+                    if (status === 0) {
+                        doRefresh();
+                    } else {
+                        nova.workspace.showWarningMessage(`Failed to move files to Trash.`);
+                    }
+                });
+                process.start();
+            } else {
+                const fileName = nova.path.basename(item.path);
+                const escaped = item.path.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+                const script = `tell application "Finder" to delete (POSIX file "${escaped}" as alias)`;
+                const process = new Process("/usr/bin/osascript", {
+                    args: ["-e", script]
+                });
+                process.onDidExit((status) => {
+                    if (status === 0) {
+                        doRefresh();
+                    } else {
+                        nova.workspace.showWarningMessage(`Failed to move "${fileName}" to Trash.`);
+                    }
+                });
+                process.start();
+            }
         })
     );
 

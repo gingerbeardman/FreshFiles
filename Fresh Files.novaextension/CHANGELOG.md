@@ -7,8 +7,9 @@
 - add: New File — create a new file from the sidebar context menu
 - add: Show All Files — toggle to temporarily show all tracked files, overriding the time window filter
 - add: Search Fresh Files — full-text search across fresh files from the command palette
-- add: Move to Trash — delete files from disk via the sidebar context menu
 - add: context menu options to ignore files and folders via "Add to Ignored" or "Add to .gitignore"
+- add: Move to Trash — delete files and folders from disk via the sidebar context menu
+- add: Move to Trash — folders are trashed whole if they contain only changed files, otherwise just the changed files are trashed
 
 ## Version 2.0.x
 
