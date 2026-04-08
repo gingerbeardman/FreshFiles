@@ -824,18 +824,23 @@ exports.activate = function () {
         })
     );
 
-    // Watch for file changes; allow git state files (index, HEAD, refs) through
-    const watcher = nova.fs.watch("**/*", (path) => {
-        if (path && (path.includes("/.git/") || path.endsWith("/.git"))) {
-            // Only refresh on git state changes (commit, checkout, merge, etc.)
-            if (path.endsWith("/.git/index") || path.endsWith("/.git/HEAD") || path.includes("/.git/refs/")) {
+    // Watch for git state changes (commit, checkout, merge, etc.)
+    const gitIndexWatcher = nova.fs.watch(".git/index", () => { debounceRefresh(); });
+    const gitHeadWatcher = nova.fs.watch(".git/HEAD", () => { debounceRefresh(); });
+    const gitRefsWatcher = nova.fs.watch(".git/refs/**", () => { debounceRefresh(); });
+    nova.subscriptions.add(gitIndexWatcher);
+    nova.subscriptions.add(gitHeadWatcher);
+    nova.subscriptions.add(gitRefsWatcher);
+
+    // Watch for document saves to detect file modifications
+    nova.subscriptions.add(
+        nova.workspace.onDidAddTextEditor((editor) => {
+            const disposable = editor.onDidSave(() => {
                 debounceRefresh();
-            }
-            return;
-        }
-        debounceRefresh();
-    });
-    nova.subscriptions.add(watcher);
+            });
+            nova.subscriptions.add(disposable);
+        })
+    );
 
     // Watch for config changes
     nova.subscriptions.add(
@@ -852,6 +857,12 @@ exports.activate = function () {
 
     nova.subscriptions.add(
         nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.pinnedFiles", () => {
+            doRefresh();
+        })
+    );
+
+    nova.subscriptions.add(
+        nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.maxFiles", () => {
             doRefresh();
         })
     );

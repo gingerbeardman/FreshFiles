@@ -99,6 +99,8 @@ class FreshFilesDataProvider {
 
         const timeWindow = nova.workspace.config.get("com.gingerbeardman.FreshFiles.timeWindow", "string") || "pending";
         this._ignoredPatterns = nova.workspace.config.get("com.gingerbeardman.FreshFiles.ignoredPatterns", "stringArray") || [];
+        this._maxFiles = nova.workspace.config.get("com.gingerbeardman.FreshFiles.maxFiles", "number") || 5000;
+        this._compiledIgnoreRegexes = this._ignoredPatterns.filter((p) => p).map((p) => this._globToRegex(p));
 
         let files;
         if (isGit) {
@@ -124,7 +126,7 @@ class FreshFilesDataProvider {
             const cutoffDate = timeWindow === "pending"
                 ? new Date(Date.now() - 24 * 60 * 60 * 1000)
                 : this._parseCutoffDate(timeWindow);
-            files = this.fileSystemService.getRecentFiles(workspacePath, cutoffDate);
+            files = this.fileSystemService.getRecentFiles(workspacePath, cutoffDate, this._maxFiles);
         }
 
         // Filter ignored patterns
@@ -172,7 +174,18 @@ class FreshFilesDataProvider {
 
         // Separate pinned files from fresh files
         const pinnedFiles = files.filter((f) => f.isPinned);
-        const freshFiles = files.filter((f) => !f.isPinned);
+        let freshFiles = files.filter((f) => !f.isPinned);
+
+        // Cap file count to prevent UI slowdown; sort first so we keep the most relevant files
+        if (freshFiles.length > this._maxFiles) {
+            console.warn(`FreshFiles: ${freshFiles.length} files exceeds max of ${this._maxFiles}, truncating`);
+            if (this._sortByName) {
+                freshFiles.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+            } else {
+                freshFiles.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+            }
+            freshFiles = freshFiles.slice(0, this._maxFiles);
+        }
 
         // Build items from fresh files
         let freshItems;
@@ -204,10 +217,7 @@ class FreshFilesDataProvider {
     }
 
     _matchesIgnored(relativePath) {
-        for (const pattern of this._ignoredPatterns) {
-            if (!pattern) continue;
-            // Simple glob matching: support * and **
-            const regex = this._globToRegex(pattern);
+        for (const regex of this._compiledIgnoreRegexes) {
             if (regex.test(relativePath)) return true;
         }
         return false;

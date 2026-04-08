@@ -1,3 +1,13 @@
+## Version 3.1.x
+
+- add: configurable Max Files setting to prevent slowdowns in very large repositories (default 5,000 but can be set in Project Settings > Extensions > Fresh Files)
+- fix: replace git status -uall with -unormal to avoid enumerating all untracked files
+- fix: replace blanket file watcher with targeted git state watchers and document save events
+- fix: add --max-count limit to git log to cap history scans
+- fix: add process timeout (10s) to prevent hung git commands from blocking the extension
+- fix: cache compiled ignore pattern regexes instead of recompiling per file
+- fix: cap filesystem directory traversal for non-git workspaces
+
 ## Version 3.0.x
 
 - add: Exhume — view deleted file contents with syntax highlighting (context menu on deleted files)

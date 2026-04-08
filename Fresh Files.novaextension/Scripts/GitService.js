@@ -5,11 +5,20 @@ class GitService {
         this.isGitRepo = true;
     }
 
-    runProcess(command, args, cwd) {
+    runProcess(command, args, cwd, timeoutMs = 10000) {
         return new Promise((resolve, reject) => {
             const process = new Process(command, { args, cwd });
             let stdout = "";
             let stderr = "";
+            let didFinish = false;
+
+            const timer = setTimeout(() => {
+                if (!didFinish) {
+                    didFinish = true;
+                    process.terminate();
+                    reject(new Error(`Process timed out after ${timeoutMs}ms: ${command} ${args.join(" ")}`));
+                }
+            }, timeoutMs);
 
             process.onStdout((line) => {
                 stdout += line;
@@ -20,6 +29,9 @@ class GitService {
             });
 
             process.onDidExit((status) => {
+                if (didFinish) return;
+                didFinish = true;
+                clearTimeout(timer);
                 if (status === 0) {
                     resolve(stdout);
                 } else {
@@ -30,6 +42,8 @@ class GitService {
             try {
                 process.start();
             } catch (err) {
+                didFinish = true;
+                clearTimeout(timer);
                 reject(err);
             }
         });
@@ -60,7 +74,7 @@ class GitService {
             const gitRoot = await this.getGitRoot(workspacePath);
             if (!gitRoot) return [];
 
-            const output = await this.runProcess("/usr/bin/git", ["status", "--porcelain", "-uall"], workspacePath);
+            const output = await this.runProcess("/usr/bin/git", ["status", "--porcelain", "-unormal"], workspacePath);
             if (!output.trim()) return [];
 
             const files = [];
@@ -123,7 +137,7 @@ class GitService {
 
             const output = await this.runProcess(
                 "/usr/bin/git",
-                ["log", `--since=${sinceArg}`, "--name-status", "--format=%aI", "--diff-filter=ACDMR"],
+                ["log", `--since=${sinceArg}`, "--max-count=1000", "--name-status", "--format=%aI", "--diff-filter=ACDMR"],
                 workspacePath
             );
             if (!output.trim()) return [];
