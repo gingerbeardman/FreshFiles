@@ -3,7 +3,7 @@
     "name": "Fresh Files",
     "organization": "gingerbeardman",
     "description": "An alternative file browser sidebar that shows only recently modified files",
-    "version": "3.1.0",
+    "version": "3.2.0",
     "bugs": "https://github.com/gingerbeardman/FreshFiles/issues",
     "homepage": "https://github.com/gingerbeardman/FreshFiles",
     "repository": "https://github.com/gingerbeardman/FreshFiles",
@@ -26,7 +26,7 @@
         {
             "key": "com.gingerbeardman.FreshFiles.timeWindow",
             "title": "Time Window",
-            "description": "Show files modified within this time period. \"Pending\" shows uncommitted changes.",
+            "description": "How far back to look for modified files.\n\"Pending\" shows uncommitted changes.",
             "type": "enum",
             "values": [
                 ["pending", "Pending Changes"],
@@ -44,16 +44,23 @@
             "default": "pending"
         },
         {
+            "key": "com.gingerbeardman.FreshFiles.respectGitignore",
+            "title": "Respect .gitignore",
+            "description": "Hide files matched by the repository's root .gitignore.",
+            "type": "boolean",
+            "default": true
+        },
+        {
             "key": "com.gingerbeardman.FreshFiles.ignoredPatterns",
-            "title": "Ignored Patterns",
-            "description": "Additional file patterns to ignore (one per line). Supports glob patterns.",
+            "title": "Custom Ignored Patterns",
+            "description": "Extra glob patterns to hide on top of .gitignore.",
             "type": "stringArray",
             "default": []
         },
         {
             "key": "com.gingerbeardman.FreshFiles.maxFiles",
             "title": "Max Files",
-            "description": "Maximum number of files to display. Prevents slowdowns in very large repositories.",
+            "description": "Cap on files shown. Prevents slowdowns in large repos.",
             "type": "number",
             "default": 5000,
             "min": 100,
@@ -62,7 +69,7 @@
         {
             "key": "com.gingerbeardman.FreshFiles.pinnedFiles",
             "title": "Pinned Files",
-            "description": "Files pinned to always appear in the sidebar regardless of time window.",
+            "description": "Files always shown in the sidebar, regardless of time window.",
             "type": "stringArray",
             "default": []
         }
@@ -148,7 +155,7 @@
                             "separator": true
                         },
                         {
-                            "title": "Add to Ignored",
+                            "title": "Add to Custom Ignored",
                             "command": "freshFiles.addToIgnored"
                         },
                         {

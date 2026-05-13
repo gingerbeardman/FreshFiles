@@ -828,9 +828,11 @@ exports.activate = function () {
     const gitIndexWatcher = nova.fs.watch(".git/index", () => { debounceRefresh(); });
     const gitHeadWatcher = nova.fs.watch(".git/HEAD", () => { debounceRefresh(); });
     const gitRefsWatcher = nova.fs.watch(".git/refs/**", () => { debounceRefresh(); });
+    const gitignoreWatcher = nova.fs.watch(".gitignore", () => { debounceRefresh(); });
     nova.subscriptions.add(gitIndexWatcher);
     nova.subscriptions.add(gitHeadWatcher);
     nova.subscriptions.add(gitRefsWatcher);
+    nova.subscriptions.add(gitignoreWatcher);
 
     // Watch for document saves to detect file modifications
     nova.subscriptions.add(
@@ -863,6 +865,12 @@ exports.activate = function () {
 
     nova.subscriptions.add(
         nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.maxFiles", () => {
+            doRefresh();
+        })
+    );
+
+    nova.subscriptions.add(
+        nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.respectGitignore", () => {
             doRefresh();
         })
     );

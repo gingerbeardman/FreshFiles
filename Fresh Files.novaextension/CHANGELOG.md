@@ -1,3 +1,9 @@
+## Version 3.2.x
+
+- add: respect .gitignore for display (configurable, on by default)
+- change: rename "Ignored Patterns" to "Custom Ignored Patterns" (and matching context menu item) to distinguish from the new .gitignore handling
+- change: shorten project settings descriptions
+
 ## Version 3.1.x
 
 - add: configurable Max Files setting to prevent slowdowns in very large repositories (default 5,000 but can be set in Project Settings > Extensions > Fresh Files)

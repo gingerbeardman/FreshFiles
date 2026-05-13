@@ -50,7 +50,7 @@ Fresh Files has two modes:
 - Sort by recency (newest first, default) or alphabetically
 - Layout and sort preferences remembered per workspace
 - Relative time display ("2h ago", "3d ago")
-- Add to Ignored — quickly hide files or folders from the sidebar via ignored patterns
+- Add to Custom Ignored — quickly hide files or folders from the sidebar via ignored patterns
 - Add to .gitignore — append files or folders to your .gitignore from the context menu
 - Deleted file indicators
 - File count on directories
@@ -65,7 +65,7 @@ Right-click on any file to:
 - Show in Finder
 - Copy Path / Copy Relative Path
 - Pin File / Unpin File
-- Add to Ignored / Add to .gitignore
+- Add to Custom Ignored / Add to .gitignore
 - Show File History
 - Exhume / Resurrect (deleted files only)
 - Diff Search
@@ -87,5 +87,6 @@ Right-click on any file to:
 Per-workspace settings are available in **Project > Project Settings > Fresh Files**:
 
 - **Time Window** — which time period to show
-- **Ignored Patterns** — glob patterns for files to hide
+- **Respect .gitignore** — hide files matched by the repository's root .gitignore (default on)
+- **Custom Ignored Patterns** — additional glob patterns for files to hide
 - **Pinned Files** — files pinned to always appear in the sidebar

@@ -7,6 +7,7 @@ class FreshFilesDataProvider {
         this.fileSystemService = fileSystemService;
         this._rootItems = [];
         this._ignoredPatterns = [];
+        this._gitignoreMatchers = [];
         this._flat = true;
         this._sortByName = false;
         this._showAll = false;
@@ -94,13 +95,18 @@ class FreshFilesDataProvider {
         }
 
         // Check for git repo (also primes the cache)
-        await this.gitService.getGitRoot(workspacePath);
+        const gitRoot = await this.gitService.getGitRoot(workspacePath);
         const isGit = this.gitService.isGitRepo;
 
         const timeWindow = nova.workspace.config.get("com.gingerbeardman.FreshFiles.timeWindow", "string") || "pending";
         this._ignoredPatterns = nova.workspace.config.get("com.gingerbeardman.FreshFiles.ignoredPatterns", "stringArray") || [];
         this._maxFiles = nova.workspace.config.get("com.gingerbeardman.FreshFiles.maxFiles", "number") || 5000;
         this._compiledIgnoreRegexes = this._ignoredPatterns.filter((p) => p).map((p) => this._globToRegex(p));
+
+        const respectGitignore = nova.workspace.config.get("com.gingerbeardman.FreshFiles.respectGitignore", "boolean");
+        this._gitignoreMatchers = (isGit && respectGitignore !== false)
+            ? this._loadGitignoreMatchers(gitRoot)
+            : [];
 
         let files;
         if (isGit) {
@@ -132,6 +138,15 @@ class FreshFilesDataProvider {
         // Filter ignored patterns
         if (this._ignoredPatterns.length > 0) {
             files = files.filter((f) => !this._matchesIgnored(f.relativePath));
+        }
+
+        // Filter .gitignore matches
+        if (this._gitignoreMatchers.length > 0 && gitRoot) {
+            files = files.filter((f) => {
+                const rel = this._pathRelativeToGitRoot(f.absolutePath, gitRoot);
+                if (rel === null) return true;
+                return !this._matchesGitignore(rel);
+            });
         }
 
         // Read pinned files from config
@@ -221,6 +236,109 @@ class FreshFilesDataProvider {
             if (regex.test(relativePath)) return true;
         }
         return false;
+    }
+
+    _pathRelativeToGitRoot(absolutePath, gitRoot) {
+        if (!absolutePath || !gitRoot) return null;
+        if (!absolutePath.startsWith(gitRoot)) return null;
+        let rel = absolutePath.substring(gitRoot.length);
+        if (rel.startsWith("/")) rel = rel.substring(1);
+        return rel;
+    }
+
+    _loadGitignoreMatchers(gitRoot) {
+        if (!gitRoot) return [];
+        const gitignorePath = nova.path.join(gitRoot, ".gitignore");
+        let contents;
+        try {
+            const file = nova.fs.open(gitignorePath, "r");
+            contents = file.read() || "";
+            file.close();
+        } catch (e) {
+            return [];
+        }
+
+        const matchers = [];
+        for (const rawLine of contents.split("\n")) {
+            const matcher = this._gitignoreLineToMatcher(rawLine);
+            if (matcher) matchers.push(matcher);
+        }
+        return matchers;
+    }
+
+    _gitignoreLineToMatcher(rawLine) {
+        let line = rawLine.replace(/\r$/, "").replace(/\s+$/, "");
+        if (!line || line.startsWith("#")) return null;
+
+        let negate = false;
+        if (line.startsWith("!")) {
+            negate = true;
+            line = line.slice(1);
+        }
+
+        let directoryOnly = false;
+        if (line.endsWith("/")) {
+            directoryOnly = true;
+            line = line.slice(0, -1);
+        }
+
+        // Leading **/ means "match at any depth, including root" — treat as unanchored
+        let leadingDoubleStar = false;
+        if (line.startsWith("**/")) {
+            leadingDoubleStar = true;
+            line = line.slice(3);
+        }
+
+        const anchored = !leadingDoubleStar && (line.startsWith("/") || line.slice(0, -1).includes("/"));
+        if (line.startsWith("/")) line = line.slice(1);
+
+        let body = "";
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === "*" && line[i + 1] === "*") {
+                // /**/ matches zero or more directories
+                if (line[i - 1] === "/" && line[i + 2] === "/") {
+                    // back up: remove the preceding "/" we already emitted, replace with (?:/.*)?/
+                    body = body.slice(0, -1) + "(?:/.*)?/";
+                    i += 2;
+                } else {
+                    body += ".*";
+                    i++;
+                }
+            } else if (ch === "*") {
+                body += "[^/]*";
+            } else if (ch === "?") {
+                body += "[^/]";
+            } else if (".+^$(){}[]|\\".includes(ch)) {
+                body += "\\" + ch;
+            } else {
+                body += ch;
+            }
+        }
+
+        let pattern;
+        if (anchored && directoryOnly) {
+            pattern = `^${body}/.+$`;
+        } else if (anchored && !directoryOnly) {
+            pattern = `^${body}(/.*)?$`;
+        } else if (!anchored && directoryOnly) {
+            pattern = `^(.*/)?${body}/.+$`;
+        } else {
+            pattern = `^(.*/)?${body}(/.*)?$`;
+        }
+
+        return { regex: new RegExp(pattern), negate };
+    }
+
+    _matchesGitignore(gitRelPath) {
+        let ignored = false;
+        for (const { regex, negate } of this._gitignoreMatchers) {
+            if (negate === !ignored) continue;
+            if (regex.test(gitRelPath)) {
+                ignored = !negate;
+            }
+        }
+        return ignored;
     }
 
     _globToRegex(glob) {
