@@ -824,17 +824,49 @@ exports.activate = function () {
         })
     );
 
-    // Watch for git state changes (commit, checkout, merge, etc.)
-    const gitIndexWatcher = nova.fs.watch(".git/index", () => { debounceRefresh(); });
-    const gitHeadWatcher = nova.fs.watch(".git/HEAD", () => { debounceRefresh(); });
-    const gitRefsWatcher = nova.fs.watch(".git/refs/**", () => { debounceRefresh(); });
-    const gitignoreWatcher = nova.fs.watch(".gitignore", () => { debounceRefresh(); });
-    nova.subscriptions.add(gitIndexWatcher);
-    nova.subscriptions.add(gitHeadWatcher);
-    nova.subscriptions.add(gitRefsWatcher);
-    nova.subscriptions.add(gitignoreWatcher);
+    // Watch workspace files so terminal/external tools trigger a refresh.
+    // Filter out noisy dirs (node_modules, build, etc.) and most of .git to
+    // avoid the performance issues that led 3.1.x to drop the blanket watcher.
+    const skipWatchDirs = new Set(FileSystemService.DEFAULT_SKIP_DIRS);
 
-    // Watch for document saves to detect file modifications
+    function shouldRefreshForPath(path) {
+        if (!path) return true;
+
+        const normalized = path.replace(/\\/g, "/");
+
+        // Git internals: only refresh on state that affects our listing
+        if (
+            normalized === ".git" ||
+            normalized.startsWith(".git/") ||
+            normalized.includes("/.git/")
+        ) {
+            return (
+                normalized.endsWith("/.git/index") ||
+                normalized.endsWith(".git/index") ||
+                normalized.endsWith("/.git/HEAD") ||
+                normalized.endsWith(".git/HEAD") ||
+                normalized.includes("/.git/refs/") ||
+                normalized.includes(".git/refs/")
+            );
+        }
+
+        const parts = normalized.split("/");
+        for (const part of parts) {
+            if (skipWatchDirs.has(part)) return false;
+        }
+
+        return true;
+    }
+
+    // null pattern = observe all workspace paths; filter in the callback
+    const fileWatcher = nova.fs.watch(null, (path) => {
+        if (shouldRefreshForPath(path)) {
+            debounceRefresh();
+        }
+    });
+    nova.subscriptions.add(fileWatcher);
+
+    // Also refresh on document saves (covers editors; FS watcher covers external tools)
     nova.subscriptions.add(
         nova.workspace.onDidAddTextEditor((editor) => {
             const disposable = editor.onDidSave(() => {

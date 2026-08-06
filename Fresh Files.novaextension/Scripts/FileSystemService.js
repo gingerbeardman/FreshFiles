@@ -1,11 +1,14 @@
+// Directories that churn often and should be skipped during scans / file watching
+const DEFAULT_SKIP_DIRS = [
+    ".git", ".svn", ".hg",
+    "node_modules", "build", "dist", "out", "vendor", "Pods",
+    ".nova", ".vscode", ".idea",
+    "__pycache__", ".cache", "DerivedData"
+];
+
 class FileSystemService {
     constructor() {
-        this._defaultSkipDirs = new Set([
-            ".git", ".svn", ".hg",
-            "node_modules", "build", "dist", "out", "vendor", "Pods",
-            ".nova", ".vscode", ".idea",
-            "__pycache__", ".cache", "DerivedData"
-        ]);
+        this._defaultSkipDirs = new Set(DEFAULT_SKIP_DIRS);
     }
 
     getRecentFiles(workspacePath, cutoffDate, maxFiles) {
@@ -63,3 +66,4 @@ class FileSystemService {
 }
 
 module.exports = FileSystemService;
+module.exports.DEFAULT_SKIP_DIRS = DEFAULT_SKIP_DIRS;

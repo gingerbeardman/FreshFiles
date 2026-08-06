@@ -1,3 +1,7 @@
+## Version 3.3.x
+
+- fix: detect file changes from terminal and external processes (re-enable workspace file watching with noisy-dir filtering)
+
 ## Version 3.2.x
 
 - add: respect .gitignore for display (configurable, on by default)
