@@ -6,15 +6,24 @@ const DEFAULT_SKIP_DIRS = [
     "__pycache__", ".cache", "DerivedData"
 ];
 
+// Build/scratch output; only skipped for non-Git workspaces, where it would otherwise
+// trigger constant rescans (Git workspaces rely on git status instead)
+const NON_GIT_SKIP_DIRS = ["tmp", "temp", "obj"];
+
+// The walk is synchronous and blocks the extension, so stop after this long
+const WALK_TIME_BUDGET_MS = 1000;
+
 class FileSystemService {
     constructor() {
-        this._defaultSkipDirs = new Set(DEFAULT_SKIP_DIRS);
+        this._defaultSkipDirs = new Set([...DEFAULT_SKIP_DIRS, ...NON_GIT_SKIP_DIRS]);
     }
 
     getRecentFiles(workspacePath, cutoffDate, maxFiles) {
         const results = [];
         this._maxFiles = maxFiles || 5000;
         this._dirCount = 0;
+        this._deadline = Date.now() + WALK_TIME_BUDGET_MS;
+        this.timedOut = false;
         this._walkDirectory(workspacePath, workspacePath, cutoffDate, results);
         return results;
     }
@@ -22,6 +31,10 @@ class FileSystemService {
     _walkDirectory(dirPath, workspacePath, cutoffDate, results) {
         // Cap directory traversal to prevent hanging on huge trees
         if (this._dirCount > this._maxFiles || results.length >= this._maxFiles) return;
+        if (Date.now() > this._deadline) {
+            this.timedOut = true;
+            return;
+        }
         this._dirCount++;
 
         let entries;
@@ -32,7 +45,7 @@ class FileSystemService {
         }
 
         for (const entry of entries) {
-            if (results.length >= this._maxFiles) return;
+            if (results.length >= this._maxFiles || this.timedOut) return;
 
             const fullPath = nova.path.join(dirPath, entry);
 
@@ -67,3 +80,4 @@ class FileSystemService {
 
 module.exports = FileSystemService;
 module.exports.DEFAULT_SKIP_DIRS = DEFAULT_SKIP_DIRS;
+module.exports.NON_GIT_SKIP_DIRS = NON_GIT_SKIP_DIRS;

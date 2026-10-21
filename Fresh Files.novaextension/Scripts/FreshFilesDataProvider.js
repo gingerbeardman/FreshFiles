@@ -11,13 +11,16 @@ class FreshFilesDataProvider {
         this._flat = true;
         this._sortByName = false;
         this._showAll = false;
+        this._lastSignature = null;
+        this._gitignoreCache = null;
     }
 
     getChildren(element) {
         if (!element) {
             return this._rootItems;
         }
-        return this._sortItems(element.children);
+        // Children are sorted once when the tree is built
+        return element.children;
     }
 
     getTreeItem(element) {
@@ -91,7 +94,8 @@ class FreshFilesDataProvider {
         const workspacePath = nova.workspace.path;
         if (!workspacePath) {
             this._rootItems = [];
-            return;
+            this._lastSignature = null;
+            return true;
         }
 
         // Check for git repo (also primes the cache)
@@ -135,6 +139,8 @@ class FreshFilesDataProvider {
             files = this.fileSystemService.getRecentFiles(workspacePath, cutoffDate, this._maxFiles);
         }
 
+        const foundCount = files.length;
+
         // Filter ignored patterns
         if (this._ignoredPatterns.length > 0) {
             files = files.filter((f) => !this._matchesIgnored(f.relativePath));
@@ -150,11 +156,13 @@ class FreshFilesDataProvider {
         }
 
         // Read pinned files from config
-        const pinnedPaths = nova.workspace.config.get("com.gingerbeardman.FreshFiles.pinnedFiles", "stringArray") || [];
+        // pinnedPaths is set while a pin change is waiting to be saved to config
+        const pinnedPaths = this.pinnedPaths || nova.workspace.config.get("com.gingerbeardman.FreshFiles.pinnedFiles", "stringArray") || [];
+        const pinnedSet = new Set(pinnedPaths);
 
         // Mark files that are pinned
         for (const file of files) {
-            if (pinnedPaths.includes(file.relativePath)) {
+            if (pinnedSet.has(file.relativePath)) {
                 file.isPinned = true;
             }
         }
@@ -202,6 +210,22 @@ class FreshFilesDataProvider {
             freshFiles = freshFiles.slice(0, this._maxFiles);
         }
 
+        this.lastRefreshStats = {
+            source: !isGit
+                ? (this.fileSystemService.timedOut ? "filesystem (scan stopped at time limit)" : "filesystem")
+                : (this._showAll ? "git all files" : `git ${timeWindow}`),
+            found: foundCount,
+            shown: pinnedFiles.length + freshFiles.length,
+            pinned: pinnedFiles.length
+        };
+
+        // Skip rebuilding the tree when nothing visible has changed
+        const signature = this._signature(pinnedFiles, freshFiles);
+        if (signature === this._lastSignature) {
+            return false;
+        }
+        this._lastSignature = signature;
+
         // Build items from fresh files
         let freshItems;
         if (this._flat) {
@@ -224,11 +248,26 @@ class FreshFilesDataProvider {
             for (const pItem of pinnedItems) {
                 pinnedSection.addChild(pItem);
             }
+            this._finalizeTree([pinnedSection]);
 
             this._rootItems = [pinnedSection, ...freshItems];
         } else {
             this._rootItems = freshItems;
         }
+        return true;
+    }
+
+    _signature(pinnedFiles, freshFiles) {
+        const parts = [this._flat ? "flat" : "tree", this._sortByName ? "name" : "time"];
+        for (const list of [pinnedFiles, freshFiles]) {
+            parts.push("--");
+            for (const f of list) {
+                // Deleted files get a fresh placeholder time on each refresh, so ignore it
+                const time = f.isDeleted ? "" : (f.mtime instanceof Date ? f.mtime.getTime() : f.mtime);
+                parts.push(`${f.relativePath}|${time}|${f.status}|${f.isDeleted ? 1 : 0}`);
+            }
+        }
+        return parts.join("\n");
     }
 
     _matchesIgnored(relativePath) {
@@ -249,6 +288,18 @@ class FreshFilesDataProvider {
     _loadGitignoreMatchers(gitRoot) {
         if (!gitRoot) return [];
         const gitignorePath = nova.path.join(gitRoot, ".gitignore");
+
+        // Reuse compiled matchers until .gitignore changes
+        let mtime = null;
+        try {
+            const stat = nova.fs.stat(gitignorePath);
+            mtime = stat ? stat.mtime.getTime() : null;
+        } catch (e) {}
+        const cache = this._gitignoreCache;
+        if (cache && cache.path === gitignorePath && cache.mtime === mtime) {
+            return cache.matchers;
+        }
+
         let contents;
         try {
             const file = nova.fs.open(gitignorePath, "r");
@@ -263,6 +314,7 @@ class FreshFilesDataProvider {
             const matcher = this._gitignoreLineToMatcher(rawLine);
             if (matcher) matchers.push(matcher);
         }
+        this._gitignoreCache = { path: gitignorePath, mtime, matchers };
         return matchers;
     }
 
@@ -366,6 +418,7 @@ class FreshFilesDataProvider {
 
     _buildTree(files, workspacePath) {
         const dirMap = new Map();
+        const addedPaths = new Set();
 
         for (const file of files) {
             const parts = file.relativePath.split("/");
@@ -396,9 +449,9 @@ class FreshFilesDataProvider {
             fileItem.isDeleted = !!file.isDeleted;
 
             if (parentChildren) {
-                // Check if child already exists
-                const existing = parentChildren.children.find((c) => c.path === fileItem.path);
-                if (!existing) {
+                // Skip files already added
+                if (!addedPaths.has(fileItem.path)) {
+                    addedPaths.add(fileItem.path);
                     parentChildren.addChild(fileItem);
                 }
             } else {
@@ -415,8 +468,8 @@ class FreshFilesDataProvider {
                 const parentPath = nova.path.dirname(path);
                 const parentDir = dirMap.get(parentPath);
                 if (parentDir && parentDir.isDirectory) {
-                    const existing = parentDir.children.find((c) => c.path === item.path);
-                    if (!existing) {
+                    if (!addedPaths.has(item.path)) {
+                        addedPaths.add(item.path);
                         parentDir.addChild(item);
                     }
                 } else {
@@ -430,8 +483,23 @@ class FreshFilesDataProvider {
         // Collapse single-child directories
         const collapsed = rootItems.map((item) => this._collapseSingleChild(item));
 
-        // Sort and return
+        // Cache directory stats and sort children, then sort and return
+        this._finalizeTree(collapsed);
         return this._sortItems(collapsed);
+    }
+
+    // Post-order walk: cache each directory's fileCount/newestMtime and sort its
+    // children once, so getChildren/getTreeItem don't re-walk subtrees on every call
+    _finalizeTree(items) {
+        for (const item of items) {
+            if (!item.isDirectory) continue;
+            this._finalizeTree(item.children);
+            item._fileCount = undefined;
+            item._newestMtime = undefined;
+            item._fileCount = item.fileCount;
+            item._newestMtime = item.newestMtime;
+            item.children = this._sortItems(item.children);
+        }
     }
 
     _collapseSingleChild(item) {

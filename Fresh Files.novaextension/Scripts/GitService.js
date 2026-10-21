@@ -1,3 +1,5 @@
+const NO_GIT_RECHECK_MS = 60 * 1000;
+
 class GitService {
     constructor() {
         this._gitRoot = null;
@@ -50,10 +52,14 @@ class GitService {
     }
 
     async getGitRoot(workspacePath) {
-        // Re-check if workspace changed
-        if (this._gitRoot && this._gitRootWorkspace === workspacePath) {
+        // Re-check if workspace changed. A null root is cached too, so non-git
+        // workspaces don't spawn git on every refresh, but only for a minute so
+        // a later `git init` is picked up
+        if (this._gitRootWorkspace === workspacePath &&
+            (this._gitRoot || Date.now() - this._gitRootCheckedAt < NO_GIT_RECHECK_MS)) {
             return this._gitRoot;
         }
+        this._gitRootCheckedAt = Date.now();
 
         try {
             const output = await this.runProcess("/usr/bin/git", ["rev-parse", "--show-toplevel"], workspacePath);
@@ -74,7 +80,7 @@ class GitService {
             const gitRoot = await this.getGitRoot(workspacePath);
             if (!gitRoot) return [];
 
-            const output = await this.runProcess("/usr/bin/git", ["status", "--porcelain", "-unormal"], workspacePath);
+            const output = await this.runProcess("/usr/bin/git", ["--no-optional-locks", "status", "--porcelain", "-unormal"], workspacePath);
             if (!output.trim()) return [];
 
             const files = [];

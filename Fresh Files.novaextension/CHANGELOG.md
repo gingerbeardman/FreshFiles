@@ -1,3 +1,19 @@
+## Version 3.4.x
+
+- add: Debug Logging setting to log refreshes, file changes and commands to the Extension Console
+- fix: Nova could freeze when toggling sort, layout or Show All, or pinning files (sidebar toggles are now stored outside project settings, and pin changes are saved together)
+- fix: non-Git workspaces ignore tmp, temp and obj folders, so build output no longer causes constant rescans
+- fix: memory leak where save listeners for closed editors were never released
+- fix: prevent git status from rewriting .git/index and re-triggering refreshes (--no-optional-locks)
+- fix: clean up temporary diff, history and exhumed files older than 7 days on startup
+- fix: tree layout caches folder file counts and newest times, and sorts each folder once per refresh
+- fix: faster duplicate and pinned-file checks for large file lists
+- fix: skip rebuilding and reloading the sidebar when the file list hasn't changed
+- fix: cache .gitignore rules until the file changes
+- fix: non-Git workspaces no longer run git on every refresh (re-checked every minute, so git init is picked up)
+- fix: large non-Git folders no longer make the extension stop responding (folder scan is time-limited and refreshes back off while files keep changing)
+- fix: file changes are no longer ignored when the workspace itself is inside a folder like build/ or .cache/
+
 ## Version 3.3.x
 
 - fix: detect file changes from terminal and external processes (re-enable workspace file watching with noisy-dir filtering)

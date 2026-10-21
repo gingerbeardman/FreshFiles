@@ -25,15 +25,48 @@ let fileSystemService = null;
 let refreshTimer = null;
 let isRefreshing = false;
 let refreshQueued = false;
+let debugLogging = false;
+let pinSaveTimer = null;
+let prefs = null;
+
+// Nova can deadlock when an extension writes config while its UI is reading config,
+// so sidebar toggles are kept in a file in workspace storage instead of workspace
+// config, and pin changes are batched into a single config write
+const PREFS_FILE = "prefs.json";
+const PIN_SAVE_DELAY_MS = 1000;
+const DEBUG_LOG_MAX_BYTES = 1024 * 1024;
+
+// Verbose logging, enabled with the Debug Logging extension setting. Also appended
+// to debug.log in workspace storage so a trace survives Nova hanging or being force quit
+function debug(...args) {
+    if (!debugLogging) return;
+    console.log("Fresh Files:", ...args);
+    try {
+        const line = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+        const file = nova.fs.open(nova.path.join(_storageDir(), "debug.log"), "a");
+        file.write(`${new Date().toISOString()} ${line}\n`);
+        file.close();
+    } catch (e) {}
+}
+let lastReloadTime = 0;
+
+// Reload even when the file list is unchanged so relative times stay current
+const RELOAD_MAX_AGE_MS = 60 * 1000;
+
+let lastRefreshDuration = 0;
+let warnedScanTimeout = false;
 
 function debounceRefresh() {
     if (refreshTimer) {
         clearTimeout(refreshTimer);
     }
+    // Back off when refreshes are slow (e.g. large non-Git folders) so the
+    // extension stays responsive while files keep changing
+    const delay = Math.max(2000, lastRefreshDuration * 3);
     refreshTimer = setTimeout(() => {
         refreshTimer = null;
         doRefresh();
-    }, 2000);
+    }, delay);
 }
 
 async function doRefresh() {
@@ -41,14 +74,29 @@ async function doRefresh() {
 
     // Prevent overlapping refreshes; queue one if already running
     if (isRefreshing) {
+        debug("refresh queued, one already running");
         refreshQueued = true;
         return;
     }
 
     isRefreshing = true;
+    const startTime = Date.now();
     try {
-        await dataProvider.refresh();
-        treeView.reload();
+        const changed = await dataProvider.refresh();
+        lastRefreshDuration = Date.now() - startTime;
+        const stats = dataProvider.lastRefreshStats;
+        if (stats && fileSystemService.timedOut && !warnedScanTimeout) {
+            warnedScanTimeout = true;
+            console.warn("Fresh Files: folder scan stopped at its time limit, so some recent files may be missing. This folder is large and not a Git repository.");
+        }
+        if (stats) {
+            debug(`refresh: ${stats.source}, ${stats.found} found, ${stats.shown} shown, ${stats.pinned} pinned, ${changed === false ? "unchanged" : "changed"}, ${Date.now() - startTime}ms`);
+        }
+        if (changed !== false || Date.now() - lastReloadTime > RELOAD_MAX_AGE_MS) {
+            treeView.reload();
+            lastReloadTime = Date.now();
+            debug("sidebar reloaded");
+        }
     } catch (err) {
         console.error("Fresh Files refresh error:", err.message);
     } finally {
@@ -99,6 +147,102 @@ function _ensureDirectoryExists(dirPath) {
     }
 }
 
+const STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Temp files (diffs, exhumed files, line history) live in workspace storage
+function _storageDir() {
+    const storageDir = nova.extension.workspaceStoragePath;
+    _ensureDirectoryExists(storageDir);
+    return storageDir;
+}
+
+// Remove old temp files; recent ones are kept so restored editor tabs still resolve
+function _pruneStorage() {
+    const storageDir = nova.extension.workspaceStoragePath;
+    if (!storageDir || !nova.fs.stat(storageDir)) return;
+
+    const cutoff = Date.now() - STORAGE_MAX_AGE_MS;
+    let entries;
+    try {
+        entries = nova.fs.listdir(storageDir);
+    } catch (e) {
+        return;
+    }
+
+    for (const entry of entries) {
+        const fullPath = nova.path.join(storageDir, entry);
+        try {
+            const stat = nova.fs.stat(fullPath);
+            if (entry === PREFS_FILE) continue;
+            // debug.log is appended to constantly, so it is capped by size rather than age
+            const tooOld = stat && stat.mtime.getTime() < cutoff;
+            const tooBig = entry === "debug.log" && stat && stat.size > DEBUG_LOG_MAX_BYTES;
+            if (stat && stat.isFile() && (tooOld || tooBig)) {
+                nova.fs.remove(fullPath);
+                debug("removed old temp file:", entry);
+            }
+        } catch (e) {
+            console.error("Failed to prune temp file:", fullPath, e.message);
+        }
+    }
+}
+
+function _loadPrefs() {
+    const prefsPath = nova.path.join(nova.extension.workspaceStoragePath, PREFS_FILE);
+    try {
+        const file = nova.fs.open(prefsPath, "r");
+        const contents = file.read();
+        file.close();
+        return JSON.parse(contents);
+    } catch (e) {}
+
+    // First run: carry over values previously stored in workspace config
+    const migrated = {};
+    const keys = { flat: "flatLayout", sortByName: "sortByName", showAll: "showAll" };
+    for (const [name, key] of Object.entries(keys)) {
+        const value = nova.workspace.config.get(`com.gingerbeardman.FreshFiles.${key}`, "boolean");
+        if (value !== null) migrated[name] = value;
+    }
+    return migrated;
+}
+
+function _savePref(name, value) {
+    prefs[name] = value;
+    try {
+        const file = nova.fs.open(nova.path.join(_storageDir(), PREFS_FILE), "w");
+        file.write(JSON.stringify(prefs));
+        file.close();
+    } catch (e) {
+        console.error("Failed to save Fresh Files preferences:", e.message);
+    }
+}
+
+function _currentPinnedFiles() {
+    if (dataProvider && dataProvider.pinnedPaths) return [...dataProvider.pinnedPaths];
+    return nova.workspace.config.get("com.gingerbeardman.FreshFiles.pinnedFiles", "stringArray") || [];
+}
+
+// Show the new pins immediately, and write them to config once changes settle
+function _setPinnedFiles(pinnedFiles) {
+    debug("pinned files now:", pinnedFiles);
+    dataProvider.pinnedPaths = pinnedFiles;
+    doRefresh();
+    if (pinSaveTimer) clearTimeout(pinSaveTimer);
+    pinSaveTimer = setTimeout(_flushPinnedFiles, PIN_SAVE_DELAY_MS);
+}
+
+function _flushPinnedFiles() {
+    if (pinSaveTimer) {
+        clearTimeout(pinSaveTimer);
+        pinSaveTimer = null;
+    }
+    if (!dataProvider || !dataProvider.pinnedPaths) return;
+    const pinnedFiles = dataProvider.pinnedPaths;
+    nova.workspace.config.set("com.gingerbeardman.FreshFiles.pinnedFiles", pinnedFiles);
+    dataProvider.pinnedPaths = null;
+    debug("pinned files saved");
+}
+
 async function _performDiffSearch(filePath) {
     const workspacePath = nova.workspace.path;
     if (!workspacePath) return;
@@ -132,8 +276,7 @@ async function _performDiffSearch(filePath) {
             try {
                 const diffOutput = await gitService.getPickaxeDiff(workspacePath, commit.hash, searchString);
 
-                const storageDir = nova.extension.workspaceStoragePath;
-                nova.fs.mkdir(storageDir);
+                const storageDir = _storageDir();
                 const shortHash = commit.hash.substring(0, 7);
                 const safeName = searchString.replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 30);
                 const tempPath = nova.path.join(storageDir, `pickaxe-${safeName}-${shortHash}.diff`);
@@ -151,17 +294,25 @@ async function _performDiffSearch(filePath) {
 }
 
 exports.activate = function () {
+    debugLogging = nova.config.get("com.gingerbeardman.FreshFiles.debugLogging", "boolean") === true;
+    if (debugLogging) {
+        console.log("Fresh Files: debug log file:", nova.path.join(nova.extension.workspaceStoragePath, "debug.log"));
+    }
+    nova.subscriptions.add(
+        nova.config.onDidChange("com.gingerbeardman.FreshFiles.debugLogging", (value) => {
+            debugLogging = value === true;
+            console.log("Fresh Files: debug logging", debugLogging ? "on" : "off");
+        })
+    );
     gitService = new GitService();
     fileSystemService = new FileSystemService();
     dataProvider = new FreshFilesDataProvider(gitService, fileSystemService);
 
     // Restore persisted layout and sort preferences
-    const savedFlat = nova.workspace.config.get("com.gingerbeardman.FreshFiles.flatLayout", "boolean");
-    const savedSort = nova.workspace.config.get("com.gingerbeardman.FreshFiles.sortByName", "boolean");
-    const savedShowAll = nova.workspace.config.get("com.gingerbeardman.FreshFiles.showAll", "boolean");
-    if (savedFlat !== null) dataProvider._flat = savedFlat;
-    if (savedSort !== null) dataProvider._sortByName = savedSort;
-    if (savedShowAll !== null) dataProvider._showAll = savedShowAll;
+    prefs = _loadPrefs();
+    if (typeof prefs.flat === "boolean") dataProvider._flat = prefs.flat;
+    if (typeof prefs.sortByName === "boolean") dataProvider._sortByName = prefs.sortByName;
+    if (typeof prefs.showAll === "boolean") dataProvider._showAll = prefs.showAll;
 
     treeView = new TreeView("com.gingerbeardman.FreshFiles.section", {
         dataProvider: dataProvider
@@ -171,6 +322,7 @@ exports.activate = function () {
     treeView.onDidChangeSelection((selection) => {
         if (selection && selection.length > 0) {
             const item = selection[0];
+            debug("selected:", item.relativePath || item.name);
             if (!item.isDirectory && !item.isDeleted && item.path) {
                 nova.workspace.openFile(item.path);
             }
@@ -180,6 +332,9 @@ exports.activate = function () {
     // Register commands
     nova.subscriptions.add(
         nova.commands.register("freshFiles.refresh", () => {
+            // Manual refresh also re-detects the git repo (e.g. after git init)
+            gitService.clearCache();
+            lastReloadTime = 0;
             doRefresh();
         })
     );
@@ -266,7 +421,7 @@ exports.activate = function () {
     nova.subscriptions.add(
         nova.commands.register("freshFiles.toggleFlat", () => {
             dataProvider._flat = !dataProvider._flat;
-            nova.workspace.config.set("com.gingerbeardman.FreshFiles.flatLayout", dataProvider._flat);
+            _savePref("flat", dataProvider._flat);
             doRefresh();
         })
     );
@@ -274,7 +429,7 @@ exports.activate = function () {
     nova.subscriptions.add(
         nova.commands.register("freshFiles.toggleSort", () => {
             dataProvider._sortByName = !dataProvider._sortByName;
-            nova.workspace.config.set("com.gingerbeardman.FreshFiles.sortByName", dataProvider._sortByName);
+            _savePref("sortByName", dataProvider._sortByName);
             doRefresh();
         })
     );
@@ -371,12 +526,13 @@ exports.activate = function () {
             const selection = treeView.selection;
             if (!selection || selection.length === 0) return;
             const item = selection[0];
+            debug("pin:", item.relativePath, { isDirectory: item.isDirectory, isPinned: item.isPinned });
             if (item.isDirectory || item.isPinned) return;
 
-            const pinnedFiles = nova.workspace.config.get("com.gingerbeardman.FreshFiles.pinnedFiles", "stringArray") || [];
+            const pinnedFiles = _currentPinnedFiles();
             if (!pinnedFiles.includes(item.relativePath)) {
                 pinnedFiles.push(item.relativePath);
-                nova.workspace.config.set("com.gingerbeardman.FreshFiles.pinnedFiles", pinnedFiles);
+                _setPinnedFiles(pinnedFiles);
             }
         })
     );
@@ -387,13 +543,14 @@ exports.activate = function () {
             const selection = treeView.selection;
             if (!selection || selection.length === 0) return;
             const item = selection[0];
+            debug("unpin:", item.relativePath, { isDirectory: item.isDirectory, isPinned: item.isPinned });
             if (item.isDirectory || !item.isPinned) return;
 
-            const pinnedFiles = nova.workspace.config.get("com.gingerbeardman.FreshFiles.pinnedFiles", "stringArray") || [];
+            const pinnedFiles = _currentPinnedFiles();
             const index = pinnedFiles.indexOf(item.relativePath);
             if (index !== -1) {
                 pinnedFiles.splice(index, 1);
-                nova.workspace.config.set("com.gingerbeardman.FreshFiles.pinnedFiles", pinnedFiles);
+                _setPinnedFiles(pinnedFiles);
             }
         })
     );
@@ -457,7 +614,7 @@ exports.activate = function () {
 
     // Search file contents in Fresh Files
     nova.subscriptions.add(
-        nova.commands.register("freshFiles.searchFiles", () => {
+        nova.commands.register("freshFiles.searchFiles", async () => {
             if (!dataProvider) return;
 
             const allFiles = [];
@@ -559,8 +716,7 @@ exports.activate = function () {
                     );
 
                     // Write diff to temp file in workspace storage
-                    const storageDir = nova.extension.workspaceStoragePath;
-                    nova.fs.mkdir(storageDir);
+                    const storageDir = _storageDir();
                     const shortHash = commit.hash.substring(0, 7);
                     const baseName = nova.path.basename(item.path);
                     const tempPath = nova.path.join(storageDir, `${baseName}-${shortHash}.diff`);
@@ -601,8 +757,7 @@ exports.activate = function () {
             }
 
             // Write to temp file with original name for syntax detection
-            const storageDir = nova.extension.workspaceStoragePath;
-            nova.fs.mkdir(storageDir);
+            const storageDir = _storageDir();
             const baseName = nova.path.basename(item.relativePath);
             const tempPath = nova.path.join(storageDir, `exhumed-${baseName}`);
 
@@ -734,8 +889,7 @@ exports.activate = function () {
                 return;
             }
 
-            const storageDir = nova.extension.workspaceStoragePath;
-            nova.fs.mkdir(storageDir);
+            const storageDir = _storageDir();
             const baseName = nova.path.basename(filePath);
             const lineLabel = startLine === endLine ? `L${startLine}` : `L${startLine}-${endLine}`;
             const tempPath = nova.path.join(storageDir, `${baseName}-${lineLabel}-history.diff`);
@@ -750,7 +904,7 @@ exports.activate = function () {
 
     // Quick open fresh file
     nova.subscriptions.add(
-        nova.commands.register("freshFiles.quickOpen", () => {
+        nova.commands.register("freshFiles.quickOpen", async () => {
             if (!dataProvider) return;
 
             // Collect all non-directory, non-deleted file items
@@ -819,7 +973,7 @@ exports.activate = function () {
         nova.commands.register("freshFiles.toggleShowAll", () => {
             if (!dataProvider) return;
             dataProvider._showAll = !dataProvider._showAll;
-            nova.workspace.config.set("com.gingerbeardman.FreshFiles.showAll", dataProvider._showAll);
+            _savePref("showAll", dataProvider._showAll);
             doRefresh();
         })
     );
@@ -828,11 +982,19 @@ exports.activate = function () {
     // Filter out noisy dirs (node_modules, build, etc.) and most of .git to
     // avoid the performance issues that led 3.1.x to drop the blanket watcher.
     const skipWatchDirs = new Set(FileSystemService.DEFAULT_SKIP_DIRS);
+    const nonGitSkipWatchDirs = new Set(FileSystemService.NON_GIT_SKIP_DIRS);
 
     function shouldRefreshForPath(path) {
         if (!path) return true;
 
-        const normalized = path.replace(/\\/g, "/");
+        let normalized = path.replace(/\\/g, "/");
+
+        // Only check path components inside the workspace, so a workspace that
+        // itself lives under e.g. ~/build/ or ~/.cache/ still refreshes
+        const workspacePath = nova.workspace.path;
+        if (workspacePath && normalized.startsWith(workspacePath + "/")) {
+            normalized = normalized.substring(workspacePath.length + 1);
+        }
 
         // Git internals: only refresh on state that affects our listing
         if (
@@ -851,8 +1013,10 @@ exports.activate = function () {
         }
 
         const parts = normalized.split("/");
+        const isGit = !gitService || gitService.isGitRepo;
         for (const part of parts) {
             if (skipWatchDirs.has(part)) return false;
+            if (!isGit && nonGitSkipWatchDirs.has(part)) return false;
         }
 
         return true;
@@ -861,6 +1025,7 @@ exports.activate = function () {
     // null pattern = observe all workspace paths; filter in the callback
     const fileWatcher = nova.fs.watch(null, (path) => {
         if (shouldRefreshForPath(path)) {
+            debug("file changed:", path);
             debounceRefresh();
         }
     });
@@ -869,40 +1034,51 @@ exports.activate = function () {
     // Also refresh on document saves (covers editors; FS watcher covers external tools)
     nova.subscriptions.add(
         nova.workspace.onDidAddTextEditor((editor) => {
-            const disposable = editor.onDidSave(() => {
+            // Dispose per-editor listeners when the editor closes, otherwise
+            // every editor ever opened stays referenced for the session
+            const saveDisposable = editor.onDidSave(() => {
+                debug("saved:", editor.document.path);
                 debounceRefresh();
             });
-            nova.subscriptions.add(disposable);
+            const destroyDisposable = editor.onDidDestroy(() => {
+                saveDisposable.dispose();
+                destroyDisposable.dispose();
+            });
         })
     );
 
     // Watch for config changes
     nova.subscriptions.add(
         nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.timeWindow", () => {
+            debug("setting changed: timeWindow");
             doRefresh();
         })
     );
 
     nova.subscriptions.add(
         nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.ignoredPatterns", () => {
+            debug("setting changed: ignoredPatterns");
             doRefresh();
         })
     );
 
     nova.subscriptions.add(
         nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.pinnedFiles", () => {
+            debug("setting changed: pinnedFiles");
             doRefresh();
         })
     );
 
     nova.subscriptions.add(
         nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.maxFiles", () => {
+            debug("setting changed: maxFiles");
             doRefresh();
         })
     );
 
     nova.subscriptions.add(
         nova.workspace.config.onDidChange("com.gingerbeardman.FreshFiles.respectGitignore", () => {
+            debug("setting changed: respectGitignore");
             doRefresh();
         })
     );
@@ -910,11 +1086,14 @@ exports.activate = function () {
     // Add treeView to subscriptions for cleanup
     nova.subscriptions.add(treeView);
 
+    _pruneStorage();
+
     // Initial refresh
     doRefresh();
 };
 
 exports.deactivate = function () {
+    _flushPinnedFiles();
     if (refreshTimer) {
         clearTimeout(refreshTimer);
         refreshTimer = null;
